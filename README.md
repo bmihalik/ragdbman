@@ -187,6 +187,11 @@ and terminal states freeze timing; resuming starts a fresh attempt with updated
 totals and counters. The same fields are available in REST, MCP job replies and
 the live SSE stream.
 
+“Inspect job record” is a stable snapshot: opening it captures the latest record.
+Live updates above it do not collapse the section or change its JSON while you
+read or select text. Use **Refresh record**, or close and reopen the section, to
+capture newer values. This remains true when the job finishes.
+
 ## Inspecting chunks
 
 Chunk inspection currently uses `sqlite3` or the search response. The web UI
@@ -210,7 +215,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.2) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.3) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

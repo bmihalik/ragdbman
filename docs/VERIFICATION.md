@@ -4,6 +4,24 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.4.3
+
+The job-inspection UI patch was checked on Linux on 26 September 2026 with
+CPython 3.12.13: **375 passed, 2 optional tests skipped** in the base profile.
+JavaScript syntax checks and the optional `tests/browser_job_record.mjs`
+Chromium regression also passed. That regression verifies actual mouse selection,
+stable inspection DOM nodes, expansion, keyboard focus, explicit refresh/reopen,
+terminal-state updates and live counters using controlled progress events.
+
+A separate real-daemon Chromium check used synthetic sources and delayed
+deterministic embeddings. Opening the record, selecting text and waiting for
+live SSE timing updates preserved both expansion and selected text. Refresh
+replaced the snapshot explicitly; it stayed open and retained its snapshot after
+completion. Desktop and mobile dark-mode views were inspected with no page errors
+or horizontal overflow. This release changes the frontend only, besides release
+metadata/documentation; optional-backend and cross-version records below remain
+earlier verification baselines.
+
 ## Version 0.4.2
 
 Scan-progress and source-text admission checks ran on Linux on 26 September 2026:

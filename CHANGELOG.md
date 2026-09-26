@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- Preserve job-panel DOM nodes during live updates so inspection details stay
+  expanded and JSON text selection and keyboard focus are not repeatedly lost.
+- Make “Inspect job record” a stable snapshot, updated only when opened or when
+  the user clicks “Refresh record”; status/counts/timing continue updating live.
+- Add an optional browser regression covering selection, focus, expansion,
+  terminal updates and explicit snapshot refresh.
+
 ## 0.4.2
 
 - Show total and processed file counts, percentage, elapsed time and approximate

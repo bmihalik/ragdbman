@@ -63,6 +63,13 @@ remote CI run has already occurred.
 
 ## Browser QA inventory
 
+With the JavaScript Playwright package and its Chromium browser installed,
+`node tests/browser_job_record.mjs` runs an isolated UI regression with synthetic
+job responses and a controlled SSE test double. It checks real mouse selection,
+stable DOM nodes, details expansion, keyboard focus, explicit refresh/reopen and
+continued live counters. This optional browser check is separate from pytest
+and does not require Ollama, a daemon or user data.
+
 `test_responsiveness.py` deliberately holds text/PDF parsing, chunking, an index
 write transaction, or pruning open while requesting overview and job endpoints.
 Thread identity and timing assertions prevent a false pass after the blocking

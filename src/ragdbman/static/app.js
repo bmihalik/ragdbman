@@ -91,12 +91,29 @@ async function uploadPage(name) {
 async function jobPage(name,id) {
   const base="/api/collections/"+encodeURIComponent(name)+"/jobs/"+id;
   main.innerHTML=heading(name+" / Indexing job","Progress is saved in SQLite and streamed live.")+
-    `<section id="job">Connecting to job…</section><div class="toolbar"><button id="cancel" class="secondary">Cancel</button><button id="resume" class="secondary">Resume</button><a href="/collections/${encodeURIComponent(name)}">Back to collection</a></div>`;
+    `<section id="job"><h2 id="job-status">Connecting to job…</h2><p id="job-progress-summary"></p><progress id="job-progress-bar" aria-label="Files processed" max="100"></progress><div class="row"><p>Elapsed: <strong id="job-elapsed">Not available</strong></p><p>Estimated remaining: <strong id="job-remaining">Not available</strong></p></div><p class="muted">Approximate ETA from processed files in this attempt; file sizes and conversion times vary.<span id="job-cleanup-note"></span></p><p id="job-counts"></p><code id="job-current-item" class="job-path"></code><pre id="job-error" class="error" hidden></pre><details id="job-inspection"><summary>Inspect job record</summary><p class="muted">This is a snapshot. Live progress continues above; this record stays unchanged while you read or select text.</p><button id="refresh-job-record" type="button" class="secondary">Refresh record</button><p id="job-snapshot-time" class="muted"></p><pre id="job-record" tabindex="0" aria-label="Job record snapshot"></pre></details></section><div class="toolbar"><button id="cancel" class="secondary">Cancel</button><button id="resume" class="secondary">Resume</button><a href="/collections/${encodeURIComponent(name)}">Back to collection</a></div>`;
   const duration=value=>{if(value==null)return "Not available";let s=Math.max(0,Math.round(value));const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return `${h?h+"h ":""}${h||m?m+"m ":""}${s%60}s`;};
-  const render=j=>{const p=j.progress,t=j.timing||{},percent=p.percent,total=p.total;
+  let latestJob=null,snapshotReady=false;
+  // Keep the DOM nodes stable: replacing this panel would collapse details,
+  // clear text selections and lose keyboard focus every time an SSE event arrives.
+  const setText=(selector,value)=>{const node=$(selector),text=String(value??"");if(node.textContent!==text)node.textContent=text;};
+  const refreshRecord=()=>{if(!latestJob)return;setText("#job-record",JSON.stringify(latestJob,null,2));setText("#job-snapshot-time","Snapshot captured at "+new Date().toLocaleTimeString());snapshotReady=true;};
+  $("#refresh-job-record").onclick=refreshRecord;
+  $("#job-inspection").ontoggle=()=>{if($("#job-inspection").open)refreshRecord();};
+  const render=j=>{latestJob=j;const p=j.progress,t=j.timing||{},percent=p.percent,total=p.total;
     const summary=total==null?(["queued","running"].includes(j.status)?"Discovering files; total not yet known":"File total unavailable"):`${p.processed} / ${total} files processed${percent==null?"":` (${percent.toFixed(1)}%)`}`;
     const eta=t.estimated_remaining_seconds==null?(j.status==="running"?"Estimating…":"Not available"):duration(t.estimated_remaining_seconds);
-    $("#job").innerHTML=`<h2>${esc(j.status)} · ${esc(p.phase||"")}</h2><p id="job-progress-summary">${esc(summary)}</p><progress aria-label="Files processed" max="100" ${percent==null?"":`value="${percent}"`}></progress><div class="row"><p>Elapsed: <strong id="job-elapsed">${duration(t.elapsed_seconds)}</strong></p><p>Estimated remaining: <strong id="job-remaining">${eta}</strong></p></div><p class="muted">Approximate ETA from processed files in this attempt; file sizes and conversion times vary.${p.phase==="pruning"?" Files are processed; missing-source cleanup is still running.":""}</p><p>${p.completed} completed · ${p.unchanged} unchanged · ${p.failed} failed · ${p.skipped} skipped</p><code class="job-path">${esc(j.current_item||"")}</code>${j.error_summary?`<pre class="error">${esc(j.error_summary)}</pre>`:""}<details><summary>Inspect job record</summary>${json(j)}</details>`;
+    setText("#job-status",`${j.status} · ${p.phase||""}`);
+    setText("#job-progress-summary",summary);
+    if(percent==null)$("#job-progress-bar").removeAttribute("value");else $("#job-progress-bar").value=percent;
+    setText("#job-elapsed",duration(t.elapsed_seconds));
+    setText("#job-remaining",eta);
+    setText("#job-cleanup-note",p.phase==="pruning"?" Files are processed; missing-source cleanup is still running.":"");
+    setText("#job-counts",`${p.completed} completed · ${p.unchanged} unchanged · ${p.failed} failed · ${p.skipped} skipped`);
+    setText("#job-current-item",j.current_item);
+    setText("#job-error",j.error_summary);
+    $("#job-error").hidden=!j.error_summary;
+    if(!snapshotReady)refreshRecord();
     $("#cancel").disabled=!["queued","running"].includes(j.status);$("#resume").disabled=!["paused","failed","cancelled","completed_with_errors"].includes(j.status);};
   render(await api(base));
   const stream=new EventSource(`/collections/${encodeURIComponent(name)}/jobs/${id}/events`);
