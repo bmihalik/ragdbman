@@ -31,6 +31,7 @@ from .config import GlobalConfig
 from .diagnostics import dependency_counts
 from .errors import RagError, require_confirmation
 from .extract import SUPPORTED, atomic_write, extension, extract
+from .extract.sniff import is_text_file
 from .metadata import candidate_terms, extract_facts
 from .models import CreateCollection, KnowledgeCardSearchRequest, MultiSearchRequest, SearchRequest
 from .ollama import Embedder, Ollama
@@ -39,7 +40,18 @@ from .search import search
 from .workers import run_async, run_sync
 
 log = logging.getLogger(__name__)
-PROGRESS = dict(discovered=0, unchanged=0, queued=0, processing=0, completed=0, failed=0, skipped=0)
+PROGRESS = dict(
+    discovered=0,
+    unchanged=0,
+    queued=0,
+    processing=0,
+    completed=0,
+    failed=0,
+    skipped=0,
+    total=None,
+    phase="queued",
+    processing_started_at=None,
+)
 
 
 class Engine:
@@ -119,7 +131,8 @@ class Engine:
                     (db.now(),),
                 )
                 conn.execute(
-                    """UPDATE jobs SET status='paused',updated_at=?,error_summary=?
+                    """UPDATE jobs SET status='paused',finished_at=COALESCE(finished_at,updated_at),
+                    updated_at=?,error_summary=?
                     WHERE status IN ('running','queued')""",
                     (db.now(), "Interrupted by daemon restart; explicitly resume this job"),
                 )
@@ -370,12 +383,14 @@ class Engine:
             raise RagError("FILE_TOO_LARGE", path.name)
         digest = await asyncio.to_thread(sha256_file, path)
         ext = extension(path)
+        supported = ext in {"yaml", "yml"} if meta["kind"] == "knowledge_cards" else ext in SUPPORTED
+        if not supported and meta["kind"] == "source_code":
+            supported = await run_sync(is_text_file, path)
         with self.connection(collection) as conn:
             existing_row = conn.execute(
                 "SELECT * FROM sources WHERE canonical_path=? AND deleted_at IS NULL", (str(path),)
             ).fetchone()
             existing = dict(existing_row) if existing_row else None
-            supported = ext in {"yaml", "yml"} if meta["kind"] == "knowledge_cards" else ext in SUPPORTED
             classification = classify(existing, digest, supported)
             if classification == "unchanged":
                 return {
@@ -414,7 +429,13 @@ class Engine:
             if not supported:
                 conn.execute(
                     "UPDATE sources SET status='unsupported',status_detail=?,updated_at=? WHERE id=?",
-                    (f"Unsupported extension: {ext}", db.now(), source_id),
+                    (
+                        f"Unrecognized filename and no supported text detected: {path.name}"
+                        if meta["kind"] == "source_code"
+                        else f"Unsupported extension: {ext or '(none)'}",
+                        db.now(),
+                        source_id,
+                    ),
                 )
                 return {"source_id": source_id, "chunks": 0, "classification": "unsupported", "skipped": True}
             conn.execute(
@@ -517,6 +538,18 @@ class Engine:
                 "skipped": False,
             }
         except BaseException as exc:
+            if (
+                meta["kind"] == "source_code"
+                and ext not in SUPPORTED
+                and isinstance(exc, RagError)
+                and exc.code == "UNSUPPORTED_MEDIA_TYPE"
+            ):
+                with self.connection(collection) as conn:
+                    conn.execute(
+                        "UPDATE sources SET status='unsupported',status_detail=?,updated_at=? WHERE id=?",
+                        (str(exc), db.now(), source_id),
+                    )
+                return {"source_id": source_id, "chunks": 0, "classification": "unsupported", "skipped": True}
             with self.connection(collection) as conn:
                 conn.execute(
                     "UPDATE sources SET status='failed',status_detail=?,updated_at=? WHERE id=?",
@@ -635,7 +668,16 @@ class Engine:
         seen = set()
         terminal = "completed"
         errors = []
-        self._job_update(collection, job_id, status="running", started_at=db.now(), error_summary=None)
+        progress["phase"] = "discovering"
+        self._job_update(
+            collection,
+            job_id,
+            status="running",
+            started_at=db.now(),
+            finished_at=None,
+            error_summary=None,
+            progress=progress,
+        )
         try:
             async with self.locks.setdefault(collection, asyncio.Lock()):
                 if params.get("rebuild"):
@@ -655,12 +697,18 @@ class Engine:
                             if not yaml_only or extension(p) in {"yaml", "yml"}
                         ]
                     )
+                progress.update(
+                    total=len(paths),
+                    discovered=len(paths),
+                    phase="indexing",
+                    processing_started_at=db.now(),
+                )
+                self._job_update(collection, job_id, progress=progress)
                 for path in paths:
                     if self.cancel_flags[job_id].is_set():
                         terminal = "cancelled"
                         break
                     seen.add(str(path.resolve()))
-                    progress["discovered"] += 1
                     progress["processing"] = 1
                     item_id = db.uid()
                     with self.connection(collection) as conn:
@@ -717,6 +765,8 @@ class Engine:
                     self._job_update(collection, job_id, progress=progress)
                     await asyncio.sleep(0)
                 if params.get("prune_missing") and terminal != "cancelled":
+                    progress["phase"] = "pruning"
+                    self._job_update(collection, job_id, progress=progress, current_item=None)
                     stop = self.cancel_flags[job_id]
                     await run_sync(
                         self._prune_missing,
@@ -740,6 +790,7 @@ class Engine:
                 log.exception("Scan worker failed")
         finally:
             progress["processing"] = 0
+            progress["phase"] = "finished" if terminal in {"completed", "completed_with_errors"} else terminal
             self._job_update(
                 collection,
                 job_id,
@@ -779,7 +830,15 @@ class Engine:
             "completed_with_errors",
         }:
             raise RagError("CONFIG_INVALID", "Only interrupted or failed scan/rebuild jobs can be resumed")
-        self._job_update(collection, job_id, status="queued", finished_at=None)
+        self._job_update(
+            collection,
+            job_id,
+            status="queued",
+            finished_at=None,
+            started_at=None,
+            current_item=None,
+            progress=dict(PROGRESS),
+        )
         self._launch(collection, job_id)
         return self.get_job(collection, job_id)
 

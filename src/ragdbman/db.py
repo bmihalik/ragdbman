@@ -188,8 +188,44 @@ def collection(conn, database_path: Path) -> dict:
     }
 
 
-def decode_job(row) -> dict:
+def decode_job(row, observed_at: datetime | None = None) -> dict:
     result = dict(row)
     result["params"] = json.loads(result.pop("params_json"))
     result["progress"] = json.loads(result.pop("progress_json"))
+    progress = result["progress"]
+    processed = sum(progress.get(k, 0) for k in ("completed", "unchanged", "failed", "skipped"))
+    total = progress.get("total")
+    complete = result["status"] in {"completed", "completed_with_errors"}
+    progress["processed"] = processed
+    progress["percent"] = (
+        min(100.0, 100.0 * processed / total) if total else 100.0 if total == 0 and complete else None
+    )
+    active = result["status"] in {"queued", "running"}
+    if not active:
+        progress["phase"] = "finished" if complete else result["status"]
+        progress["processing"] = 0
+
+    def timestamp(value):
+        return datetime.fromisoformat(value).astimezone(timezone.utc) if value else None
+
+    end = (
+        (observed_at or datetime.now(timezone.utc))
+        if active
+        else timestamp(result.get("finished_at") or result.get("updated_at"))
+    )
+    start = timestamp(result.get("started_at"))
+    elapsed = max(0.0, (end - start).total_seconds()) if end and start else 0.0
+    indexing_start = timestamp(progress.get("processing_started_at"))
+    eta = None
+    if complete:
+        eta = 0.0
+    elif (
+        active and progress.get("phase") == "indexing" and processed and total is not None and indexing_start
+    ):
+        eta = max(0.0, (end - indexing_start).total_seconds()) / processed * max(0, total - processed)
+    result["timing"] = {
+        "elapsed_seconds": round(elapsed, 1),
+        "estimated_remaining_seconds": round(eta, 1) if eta is not None else None,
+        "estimate_basis": "current_attempt_average_file_rate",
+    }
     return result

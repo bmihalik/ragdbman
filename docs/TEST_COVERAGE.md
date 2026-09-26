@@ -18,6 +18,8 @@ compatibility with every real document, external tool version, or deployment.
 | Same-named launcher collisions, source-qualified resources, import guards, CLI invocation and local environment selection | `test_launcher.py` |
 | Two/five-tool MCP profiles, transport authorization, REST bypass denial, scoped discovery, unified queries, action validation and card rendering | `test_corpus.py` |
 | Citation/CodeMeta identity, author, license, release-version consistency and wheel inclusion plan | `test_release_metadata.py` |
+| Total/processed counts, percentage, ETA, empty scans, cancellation/resume and downtime-safe recovery | `test_scan_progress.py` |
+| Extensionless/unknown source text detection, Unicode, binary rejection, full validation and line chunking | `test_source_sniff.py` |
 
 Source-code collections are tested for the absence of sidecars across multiple
 input formats. General collections are separately tested for intentional

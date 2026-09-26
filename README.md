@@ -117,6 +117,12 @@ See [PDF backends](docs/PDF_BACKENDS.md) and [licensing](docs/LICENSING.md) for 
 
 - **General collections:** document-oriented indexing. With the default sidecar setting, code and binary documents are materialized as Markdown and indexed as ordinary documents.
 - **Source-code collections:** direct extraction and line-boundary code chunking, with code-oriented model and chunk defaults. No `.ragdbman` directory is created for any file in these collections, including Markdown, PDFs, and plain text.
+- **Unrecognized source filenames:** source-code collections sniff extensionless
+  files such as `Kconfig` and `LICENSE`, plus unfamiliar suffixes such as
+  `sdkconfig.defaults`. UTF-8 text and BOM-marked UTF-16/UTF-32 are indexed with
+  line provenance; binary signatures, NUL/control content and empty files are
+  skipped. A bounded 64 KiB probe is followed by full-content validation before
+  embedding. General and Knowledge Cards collection policies are unchanged.
 - **Independent collections:** index the same repository in both collection kinds when you want different retrieval strategies. Settings and indexes are independent.
 
 ```bash
@@ -164,12 +170,29 @@ Existing sidecar directories are not deleted when a source is indexed into a sou
 
 `docs/VISION.md` describes the product direction, not a release-status checklist. Its broad “every source is converted” wording does not override the source-code or Knowledge Cards collection exemptions. Structured Knowledge Cards collections are implemented; authoring/curation workflows and fully configurable document-type chunking strategies remain future work.
 
+## Scan progress
+
+The job view reports processed/total files, percentage, elapsed time and
+approximate remaining time. Discovery runs first; the total is shown as unknown
+until the scan's file list is ready. The total respects hidden-file, symlink,
+recursion and collection-kind filters, and includes files later skipped as
+unsupported.
+
+Processed files include completed, unchanged, failed and skipped outcomes.
+Elapsed time covers the current attempt; ETA uses its average processing time
+per file, excluding initial discovery. It is an estimate, not a guarantee:
+large PDFs or slow converters can change it substantially. ETA is unavailable
+before the first processed file or during missing-source cleanup. Cancellation
+and terminal states freeze timing; resuming starts a fresh attempt with updated
+totals and counters. The same fields are available in REST, MCP job replies and
+the live SSE stream.
+
 ## Inspecting chunks
 
 Chunk inspection currently uses `sqlite3` or the search response. The web UI
 shows retrieved chunks and their provenance, but it does not yet offer a
 dedicated browser for all chunks of a source; that web chunk browser is a
-fast-follow, not a feature of 0.4.1.
+fast-follow, not yet implemented.
 
 For full stored chunk text and boundaries, open the collection database read-only:
 
@@ -187,7 +210,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.1) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.2) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

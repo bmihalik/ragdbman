@@ -27,3 +27,4 @@ details{margin:var(--s4) 0}summary{cursor:pointer;min-height:44px}progress{width
 @media(max-width:600px){main{padding:var(--s6) var(--s4)}header{gap:var(--s4);padding:var(--s3) var(--s4)}nav{order:3;width:100%;font-size:var(--small)}header>button{margin-left:auto}.row{display:block}section{padding:var(--s4)}}
 @media(prefers-reduced-motion:no-preference){button,a{transition:opacity .15s}button:hover{opacity:.85}}
 [hidden]{display:none!important}
+.job-path{display:block;overflow-wrap:anywhere}

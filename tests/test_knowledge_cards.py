@@ -50,7 +50,10 @@ async def test_ingestion_field_vectors_and_non_card_skip(engine, source_dir):
     await create(engine, source_dir)
     completed = await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
     assert completed["status"] == "completed"
-    assert completed["progress"] == {
+    assert {
+        k: completed["progress"][k]
+        for k in ("discovered", "unchanged", "queued", "processing", "completed", "failed", "skipped")
+    } == {
         "discovered": 2,
         "unchanged": 0,
         "queued": 0,

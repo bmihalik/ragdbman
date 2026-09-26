@@ -4,6 +4,38 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.4.2
+
+Scan-progress and source-text admission checks ran on Linux on 26 September 2026:
+
+| Interpreter | Installation/profile | Result |
+| --- | --- | --- |
+| CPython 3.12.13 | Editable base, complete suite | 375 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Editable PyMuPDF extra, complete suite | 377 passed |
+| CPython 3.11.15 | Installed base wheel, progress/sniff/metadata tests | 43 passed |
+| CPython 3.13.12 | Installed base wheel, progress/sniff/metadata tests | 43 passed |
+
+The focused wheel runs are not claimed as complete Python 3.11/3.13 suite reruns.
+Base-profile statement coverage remains approximately 93%.
+
+Forty added cases cover candidate totals before the first embedding finishes,
+processed/percentage calculations, elapsed/ETA formulas, unavailable estimates,
+empty scans, cancellation, resumed attempts, stopped-time freezing and recovery
+without counting daemon downtime. Text detection cases cover the requested
+filenames, Unicode encodings, multibyte probe boundaries, binary signatures,
+control bytes, binary tails, skipped-file retry, line provenance and intact
+oversized source lines. General-collection admission remains unchanged.
+
+Chromium checks used synthetic files and delayed deterministic embeddings, not
+production data or a real model. A source-code scan showed 1/33 processed and an
+approximate ETA while indexing, remained navigable through the overview, froze
+timing on cancellation, resumed, and finished at 33/33 (100%) with zero remaining
+time. Reloading preserved the final elapsed time. Desktop 1280px and mobile 375px
+views were inspected, including dark mode; no page errors or horizontal overflow
+were recorded. The new browser checks supplement the HTTP responsiveness tests.
+
+The following records describe earlier verification baselines.
+
 ## Version 0.4.1
 
 The metadata/documentation release was checked on Linux on 26 September 2026:

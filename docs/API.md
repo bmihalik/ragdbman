@@ -50,6 +50,29 @@ Creation accepts `name`, `description`, `source_roots`, `kind`, `embedding_model
 
 Scan bodies accept `root`, `recursive`, and `prune_missing`. File-add bodies accept `path`. Rebuild bodies require `{"confirm":true}`. Delete endpoints use `?confirm=true`, with optional `delete_files=true` for collections or `delete_original_managed_file=true` for sources.
 
+### Scan job progress
+
+Job REST responses, `corpus_job` replies and SSE `progress` events include:
+
+- `progress.total`: candidate file count after discovery; null until known.
+- `progress.discovered`: the discovered candidate count.
+- `progress.processed`: completed + unchanged + failed + skipped.
+- `progress.percent`: processed/total × 100; null until meaningful. A completed
+  empty scan reports 100%; cancelled or failed scans retain partial progress.
+- `progress.phase`: queued, discovering, indexing, pruning, finished, paused,
+  cancelled or failed.
+- `timing.elapsed_seconds`: current-attempt elapsed time, frozen when stopped.
+- `timing.estimated_remaining_seconds`: average indexing seconds per processed
+  file × remaining files, or null when unavailable. Completed jobs report zero.
+- `timing.estimate_basis`: `current_attempt_average_file_rate`.
+
+The candidate total respects scan exclusions and collection-kind filters.
+Progress can reach 100% of files while optional pruning is still running;
+`phase="pruning"` makes that distinction explicit and has no cleanup ETA.
+Elapsed includes discovery, whereas the ETA rate begins after discovery.
+Resume rediscovers candidates and resets counters/timing for the new attempt.
+Estimates vary with document size and converter/model performance.
+
 ## Document-oriented REST search request
 
 These REST routes support the administrative UI and retain their specialized

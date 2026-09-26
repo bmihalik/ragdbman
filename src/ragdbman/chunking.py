@@ -96,7 +96,7 @@ def chunk_document(doc: Document, tokenizer: Tokenizer, size: int, overlap: int)
     if size <= 0 or overlap < 0 or overlap >= size:
         raise RagError("CONFIG_INVALID", "Chunk size must be positive and overlap must be smaller than size")
     full = doc.full_text
-    code = doc.extractor_name == "source_code"
+    code = doc.extractor_name in {"source_code", "source_code_text_sniff"}
     groups: list[list[Unit]] = []
     units: list[Unit] = []
     cursor = 0

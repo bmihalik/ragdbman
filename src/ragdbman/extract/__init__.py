@@ -17,6 +17,7 @@ from ..models import Block, Document
 from . import office
 from .media import AUDIO_VIDEO, IMAGES, LEGACY, legacy, ocr, transcribe
 from .pdf import extract_pdf
+from .sniff import text_content
 from .text import (
     CODE_EXTENSIONS,
     TEXT_EXTENSIONS,
@@ -123,6 +124,15 @@ def atomic_write(path: Path, text: str):
 
 
 async def extract(path: Path, cfg: GlobalConfig, kind: str) -> tuple[Document, str | None]:
+    if kind == "source_code" and extension(path) not in SUPPORTED:
+        # Check the complete file again: a printable prefix cannot admit a binary tail.
+        text = text_content(path.read_bytes())
+        if text is None:
+            raise RagError("UNSUPPORTED_MEDIA_TYPE", "Unrecognized file is not supported Unicode text")
+        document = source_code(text, path)
+        document.extractor_name = "source_code_text_sniff"
+        document.warnings.append("Unrecognized filename indexed as detected Unicode source text")
+        return document, None
     # This guard precedes ALL mkdir/image relocation, for all file types.
     if kind == "source_code" or not cfg.storage.markdown_sidecar_enabled:
         document, _ = await extract_direct(path, cfg)

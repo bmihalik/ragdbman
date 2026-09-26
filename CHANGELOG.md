@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2
+
+- Show total and processed file counts, percentage, elapsed time and approximate
+  remaining time in live scan progress. Expose the same values in REST/MCP job
+  replies, with explicit discovery/indexing/cleanup phases and per-attempt timing.
+- Freeze elapsed time on cancellation/completion and avoid counting daemon
+  downtime when recovering interrupted jobs.
+- In source-code collections, sniff extensionless and unrecognized-suffix files
+  for Unicode text. Preserve source-line chunking and the no-sidecar rule; reject
+  binary/empty inputs and validate full contents before embedding.
+- Keep general and Knowledge Cards admission rules unchanged. A normal scan can
+  now index previously unsupported source text without a destructive rebuild.
+
 ## 0.4.1
 
 - Add CITATION.cff and codemeta.json with synchronized release, author and license

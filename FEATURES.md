@@ -37,6 +37,14 @@ This document describes implemented functionality, not every aspiration in the v
 
 Supported source languages include Rust, Python, JavaScript/TypeScript, Go, Java, Kotlin, C/C++, C#, PHP, Swift, Scala, Objective-C, R, Ruby, shell, SQL, Lua, Perl, Vue and Svelte. Additional extensions are accepted by the same best-effort heuristics; this is not a compiler or tree-sitter parser.
 
+Source-code collections also sniff unrecognized names/suffixes, including
+`Kconfig`, `LICENSE` and `sdkconfig.defaults`. A 64 KiB probe admits nonempty
+UTF-8 or BOM-marked UTF-16/UTF-32 without binary signatures or disallowed control
+characters. Full-content validation then protects against binary tails before
+embedding. Sniffed files use source-line chunking, retain their actual extension,
+and never create sidecars. Unknown legacy encodings may still be skipped;
+recognized-format decoding policies and general/KC admission rules are unchanged.
+
 External tools are disabled until configured. Arguments are passed without a shell, stdin is closed, the environment is allowlisted, and timeouts terminate the process group on POSIX. Each conversion uses its own scratch directory; LibreOffice gets a separate user profile and `GIO_USE_VFS=local`.
 
 ### PDF fallback behavior
@@ -79,6 +87,13 @@ Markdown flattening does not preserve every original page/slide/line/timestamp c
 - Chunk records contain tokens, reconstructed-text character offsets, percentage position, sections, and available page/slide/time/line anchors.
 
 ## Jobs
+
+After candidate discovery, jobs expose a fixed total, processed count, percentage
+and phase. REST/MCP/SSE compute live elapsed and approximate remaining time from
+the current attempt. Skipped, unchanged and failed files count as processed;
+cleanup is a separate phase. Cancellation freezes elapsed time, recovery uses
+the last durable update rather than counting downtime, and resume starts a new
+attempt. The browser displays these values with an explicitly approximate ETA.
 
 Scans classify files as new, unchanged, changed, previously failed, unsupported or missing. Hidden files, symlink traversal and recursion are configurable; sidecar directories are always pruned. Canonical path checks prevent symlink traversal from escaping allowed roots.
 
