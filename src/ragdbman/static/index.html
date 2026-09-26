@@ -1,0 +1,34 @@
+<!--
+SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+SPDX-License-Identifier: Apache-2.0
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Inspect your sources, indexing jobs and retrieval evidence with ragdbman.">
+  <title>ragdbman · Document intelligence</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <a class="brand" href="/" aria-label="ragdbman dashboard">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 3h12l4 4v14H4zM16 3v5h4M8 11h8M8 15h8M8 18h5" stroke="currentColor" stroke-width="1.5"/>
+      </svg><b>ragdbman</b>
+    </a>
+    <nav aria-label="Primary"><a href="/">Dashboard</a><a href="/collections">Collections</a><a href="/search-multi">Search all</a></nav>
+    <button id="theme" class="secondary" aria-label="Switch color theme">Theme</button>
+  </header>
+  <main id="main"><p role="status">Loading your workspace…</p></main>
+  <footer>Local document intelligence · Python edition · <a href="/docs">API reference</a></footer>
+  <dialog id="confirm-dialog">
+    <h2>Confirm operation</h2><p id="confirm-message"></p>
+    <form method="dialog"><button value="cancel" class="secondary">Cancel</button><button value="yes" class="danger">Confirm</button></form>
+  </dialog>
+</body>
+</html>

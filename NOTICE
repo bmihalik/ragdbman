@@ -1,0 +1,10 @@
+ragdbman
+Copyright 2026 Bela Istvan MIHALIK
+
+Licensed under the Apache License, Version 2.0.
+See LICENSE for the full license text.
+
+This notice applies to ragdbman's first-party code and documentation.
+Third-party dependencies, optional external converters and model weights
+retain their own copyrights and licenses. They are not relicensed by this
+notice or by ragdbman's Apache-2.0 license.

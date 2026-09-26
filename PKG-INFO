@@ -1,0 +1,249 @@
+Metadata-Version: 2.5
+Name: ragdbman
+Version: 0.4.1
+Summary: Inspectable local document intelligence, SQLite retrieval, and MCP
+Author: Bela Istvan MIHALIK
+License-Expression: Apache-2.0
+License-File: LICENSE
+License-File: NOTICE
+Requires-Python: >=3.11
+Requires-Dist: beautifulsoup4<5,>=4.12
+Requires-Dist: charset-normalizer<4,>=3.4
+Requires-Dist: defusedxml<1,>=0.7
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: markdown-it-py<5,>=3
+Requires-Dist: mcp<2,>=1.12
+Requires-Dist: mobi<1,>=0.3
+Requires-Dist: openpyxl<4,>=3.1
+Requires-Dist: pydantic<3,>=2.9
+Requires-Dist: pypdf[crypto]<7,>=5
+Requires-Dist: python-multipart>=0.0.18
+Requires-Dist: pyyaml<7,>=6
+Requires-Dist: sqlite-vec<0.2,>=0.1.6
+Requires-Dist: tokenizers<1,>=0.21
+Requires-Dist: tomli-w<2,>=1.1
+Requires-Dist: uvicorn<1,>=0.30
+Provides-Extra: pymupdf
+Requires-Dist: pymupdf<2,>=1.25; extra == 'pymupdf'
+Description-Content-Type: text/markdown
+
+# ragdbman
+
+An inspectable, local document intelligence system, implemented in Python. Organize named collections, follow indexing jobs, inspect Markdown sidecars and SQLite records, and retrieve source-backed evidence through MCP, REST, or the administrative UI.
+
+Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: two operational tools, with three additional administrative tools available separately.
+
+## Install with uv
+
+Use Python 3.11 or newer. Python 3.12 is recommended for the widest compatibility with optional converter installations.
+
+```bash
+cd ragdbman
+uv sync --locked
+uv run ragdbman init
+```
+
+Edit `~/.config/ragdbman/config.toml` and explicitly allow your source directories:
+
+```toml
+[storage]
+allowed_source_roots = ["/home/you/Documents", "/home/you/Projects"]
+```
+
+Run Ollama separately and install the embedding models you intend to use:
+
+```bash
+ollama pull bge-m3:567m
+ollama pull unclemusclez/jina-embeddings-v2-base-code:f16
+```
+
+Download the corresponding exact tokenizers:
+
+```bash
+uv run ragdbman fetch-tokenizer --hf-repo BAAI/bge-m3
+uv run ragdbman fetch-tokenizer \
+  --hf-repo jinaai/jina-embeddings-v2-base-code \
+  --model unclemusclez/jina-embeddings-v2-base-code:f16
+uv run ragdbman serve
+```
+
+Use the project environment rather than mixing distribution Python packages
+with packages under `~/.local`. After `uv sync --locked`, the bundled executable
+`./ragdbman.py serve` is also supported: from system Python it selects the local
+`.venv` if present, and from an already active virtual environment it keeps that
+interpreter. The installed `ragdbman` command remains the recommended entry point.
+
+### Startup troubleshooting
+
+If opening `/` reports `asyncio.run() cannot be called from a running event loop`
+and the traceback imports a top-level `ragdbman.py` during resource loading, a
+same-named custom launcher is shadowing the package and executing its `main()`
+again. Replace that launcher with the bundled guarded version; resource loading
+is also anchored to the actual package, not a hard-coded import name.
+
+If a traceback mixes `/usr/lib/python3/dist-packages` with `~/.local/lib`, stop
+the daemon and run `uv sync --locked` followed by `uv run --locked ragdbman serve`.
+Do not fix this by suppressing Pydantic warnings or installing individual
+dependencies into the system interpreter. An unresolved MCP `lifespan` warning
+is separate from the launcher recursion; reproduce it in the locked environment
+before diagnosing upstream dependency compatibility.
+
+Open `http://127.0.0.1:8765` for the UI or `/docs` for the REST schema. MCP clients use `/mcp/query` with a query token; the optional administrator profile is `/mcp/admin`. See [MCP setup](docs/MCP.md) for separate credentials and collection scope. Collection creation probes the selected model; it requires Ollama and the model to be available. The daemon can start without Ollama, and keyword/structured retrieval of an existing collection remains available.
+
+If a model has no available tokenizer, explicitly opt into estimated counts:
+
+```toml
+[defaults]
+allow_approximate_tokenizer = true
+```
+
+Exact tokenization is the default requirement for document and source-code collections. Knowledge Cards embed whole YAML fields and do not need a tokenizer. The selected mode is recorded in collection metadata.
+
+## Select a PDF backend
+
+The default installation includes pypdf and does **not** install PyMuPDF, MinerU,
+Marker or their models. The default `auto` policy tries separately configured
+MinerU/Marker commands, then pypdf; it never imports PyMuPDF.
+
+**PDF chapter detection requires MinerU or Marker in the current pipeline.**
+For textbooks and other long PDFs, configure one of these converters as the
+recommended setup for heading/section-aware chunking, not merely an optional
+quality enhancement. ragdbman uses the headings in their Markdown output;
+chapter recognition still depends on the converter and the input document.
+The pypdf and PyMuPDF adapters provide text/pages, not chapter detection.
+See [chapter-aware PDF setup](docs/PDF_BACKENDS.md#recommended-setup-for-pdf-chapter-detection).
+
+For pypdf only, even if external converters are configured:
+
+```toml
+[media]
+pdf_backend = "pypdf"
+```
+
+For your independently installed MinerU:
+
+```toml
+[media]
+pdf_backend = "mineru"
+mineru_command = "mineru" # resolved from the service's PATH
+mineru_cli = "legacy"   # -p INPUT -o OUTPUT_DIR
+mineru_extra_args = [] # e.g. ["-b", "pipeline"] if your version supports it
+pdf_fallback = false  # preserve the chapter-aware requirement; fail instead of text-only fallback
+```
+
+If the installed executable uses `mineru parse`, set `mineru_cli = "parse"`.
+That adapter requests all pages explicitly. MinerU always runs as a separate
+executable, not an imported Python library; no MinerU package or model is bundled.
+MinerU 3.4.5 is the maintainer's planned real-installation test target, not yet a
+verified version. Check `mineru --help` against the configured CLI interface.
+
+PyMuPDF remains an explicit alternative: install `uv sync --locked --extra pymupdf`
+and set `media.pdf_backend = "pymupdf"` only if you choose to accept its separate
+licensing. pypdf extracts text, but does not render scanned PDF pages for OCR.
+See [PDF backends](docs/PDF_BACKENDS.md) and [licensing](docs/LICENSING.md) for details.
+
+## Choose the indexing strategy
+
+- **General collections:** document-oriented indexing. With the default sidecar setting, code and binary documents are materialized as Markdown and indexed as ordinary documents.
+- **Source-code collections:** direct extraction and line-boundary code chunking, with code-oriented model and chunk defaults. No `.ragdbman` directory is created for any file in these collections, including Markdown, PDFs, and plain text.
+- **Independent collections:** index the same repository in both collection kinds when you want different retrieval strategies. Settings and indexes are independent.
+
+```bash
+curl -X POST http://127.0.0.1:8765/api/collections \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"code","kind":"source_code","source_roots":["/home/you/Projects"]}'
+
+curl -X POST http://127.0.0.1:8765/api/collections/code/scan \
+  -H 'Content-Type: application/json' \
+  -d '{"root":"/home/you/Projects","recursive":true}'
+
+curl -X POST http://127.0.0.1:8765/api/search \
+  -H 'Content-Type: application/json' \
+  -d '{"collection":"code","query":"document retrieval","mode":"hybrid"}'
+```
+
+Existing sidecar directories are not deleted when a source is indexed into a source-code collection. They are excluded from scanning, including when hidden-file indexing is enabled.
+
+## Features
+
+- **Storage:** one SQLite database per collection; atomic registry writes and database reconciliation; FTS5, sqlite-vec, metadata, jobs, errors, audit records, and source versions.
+- **Indexing:** SHA-256 change detection, unchanged-file skipping, failed-source retries, resumable jobs, cancellation before commit, transactional source replacement, and optional missing-file pruning.
+- **Extraction:** text, CSV/TSV, Markdown, HTML, PDF, OOXML, ODF, EPUB, best-effort MOBI/AZW/AZW3, source code, and opt-in external OCR, legacy Office, and transcription.
+- **Chunking:** exact Hugging Face tokenizers or explicitly approximate counts, sentence/token windows, heading and section boundaries, atomic blocks, code-line boundaries, overlap, and duplicate suppression.
+- **Retrieval:** keyword/BM25, vector distance, hybrid rank fusion, structured filters, multi-collection rank fusion, source citations, numeric/date facts, and keyword vocabulary.
+- **Interfaces:** `corpus_describe` and `corpus_query` for agents; optional `corpus_manage`, `corpus_ingest`, and `corpus_job` for administrators. REST/OpenAPI, managed uploads, maintenance controls, and live SSE job progress remain available.
+- **Knowledge Cards:** structured YAML collections, separate field vectors, confidence-weighted retrieval, and complete ID-free YAML within the unified `corpus_query` response. See the [Knowledge Cards guide](docs/KNOWLEDGE_CARDS.md).
+
+## Documentation
+
+- [Features and limitations](FEATURES.md)
+- [Configuration reference](docs/CONFIGURATION.md)
+- [PDF backend selection](docs/PDF_BACKENDS.md)
+- [License and dependency boundaries](docs/LICENSING.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [REST and MCP interfaces](docs/API.md)
+- [Testing and verification](docs/TESTING.md)
+- [Test coverage map](docs/TEST_COVERAGE.md)
+- [Release verification record](docs/VERIFICATION.md)
+- [Contribution guide](CONTRIBUTING.md)
+- [Product vision](docs/VISION.md)
+- [Roadmap](TODO.md)
+- [Changelog](CHANGELOG.md)
+- [Attribution](AUTHORS.md)
+
+`docs/VISION.md` describes the product direction, not a release-status checklist. Its broad “every source is converted” wording does not override the source-code or Knowledge Cards collection exemptions. Structured Knowledge Cards collections are implemented; authoring/curation workflows and fully configurable document-type chunking strategies remain future work.
+
+## Inspecting chunks
+
+Chunk inspection currently uses `sqlite3` or the search response. The web UI
+shows retrieved chunks and their provenance, but it does not yet offer a
+dedicated browser for all chunks of a source; that web chunk browser is a
+fast-follow, not a feature of 0.4.1.
+
+For full stored chunk text and boundaries, open the collection database read-only:
+
+```sh
+sqlite3 -readonly "$HOME/.local/share/ragdbman/collections/books/books.sqlite" \
+  "SELECT source_id, chunk_index, heading, section_path, token_count, text
+   FROM chunks ORDER BY source_id, chunk_index LIMIT 20;"
+```
+
+Replace `books` and the data directory with your collection's settings.
+Search responses contain matching excerpts and provenance; excerpts may be
+truncated according to `search.return_context_chars_per_chunk`. Read SQLite when
+you need the full stored text or chunks that did not appear in search results.
+Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
+
+## Citing ragdbman
+
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.1) [Computer software].
+Machine-readable citation and software metadata are provided in
+[CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
+Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).
+
+## Develop and test
+
+```bash
+uv sync --locked
+uv run pytest
+uv run pytest --cov=ragdbman --cov-config=pyproject.toml --cov-report=term-missing
+uv run ruff check .
+uv run ruff format --check .
+uv build
+```
+
+Automated tests use generated local document fixtures, deterministic test-only embeddings, HTTP mocks, and fake external executables. They do not download models or require a GPU. See [TESTING.md](docs/TESTING.md) for what was and was not exercised.
+
+## Operational safety
+
+Bind to loopback by default. Use an authenticated reverse proxy with TLS for remote access, set explicit source-root allowlists, and do not run the service as root. External commands are administrator-configured executables, not an OS security sandbox.
+
+Start with a fresh data directory and explicitly allow only the source roots you intend to index. Run one daemon process per data directory, and back up collection databases and the registry before destructive maintenance.
+
+## License
+
+ragdbman is licensed under [Apache License 2.0](LICENSE).
+Copyright 2026 Bela Istvan MIHALIK. See [NOTICE](NOTICE) and
+[dependency licensing](docs/LICENSING.md); the project license does not relicense
+third-party packages, external converters or model weights.

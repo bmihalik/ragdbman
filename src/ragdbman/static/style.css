@@ -1,0 +1,29 @@
+/*
+SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+SPDX-License-Identifier: Apache-2.0
+*/
+
+:root{color-scheme:light;--bg:#f4f6f8;--panel:#fff;--text:#182334;--muted:#546174;--accent:#275db3;--border:#d9e0e9;--danger:#ad302a;--s1:.25rem;--s2:.5rem;--s3:.75rem;--s4:1rem;--s6:1.5rem;--s8:2rem;--small:.875rem;--body:1rem;--title:clamp(1.5rem,1.2rem + 1vw,2rem)}
+[data-theme=dark]{color-scheme:dark;--bg:#0f1115;--panel:#171a21;--text:#e6e8ec;--muted:#a5afbf;--accent:#86adf4;--border:#303746;--danger:#fa9d96}
+*{box-sizing:border-box}body{margin:0;font:var(--body)/1.6 "Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--text)}
+header{display:flex;align-items:center;gap:var(--s8);padding:var(--s3) var(--s6);border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}
+.brand{display:flex;gap:var(--s2);align-items:center;color:var(--text);text-decoration:none}nav{display:flex;gap:var(--s6);flex:1}nav a{color:var(--muted);text-decoration:none}
+main{max-width:1120px;margin:auto;padding:var(--s8) var(--s6);min-height:75vh}footer{max-width:1120px;margin:auto;padding:var(--s6);font-size:var(--small);color:var(--muted)}
+h1{font-size:var(--title);line-height:1.25;margin:0 0 var(--s2)}h2{font-size:1.125rem;margin:0 0 var(--s4)}h3{font-size:var(--body)}
+p{max-width:80ch}.muted,.eyebrow{color:var(--muted)}.eyebrow{font:var(--small)/1.6 monospace;text-transform:uppercase;letter-spacing:.06em}
+section,.card{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:var(--s6);margin:var(--s6) 0}
+.row{display:flex;gap:var(--s4);flex-wrap:wrap;align-items:end}.row>*{flex:1;min-width:160px}.stats{display:flex;flex-wrap:wrap;gap:var(--s8)}.stat{min-width:120px}.stat strong{display:block;font:600 var(--title)/1.4 monospace}
+button,.btn{font:inherit;display:inline-block;padding:var(--s2) var(--s4);min-height:44px;border-radius:4px;background:var(--accent);color:var(--panel);border:1px solid transparent;cursor:pointer;text-decoration:none}
+.secondary{background:transparent;border-color:var(--border);color:var(--text)}.danger{background:transparent;color:var(--danger);border-color:var(--danger)}button:disabled{opacity:.5;cursor:wait}
+a{color:var(--accent)}a:hover{text-decoration:underline}input,textarea,select{font:inherit;width:100%;padding:var(--s2);min-height:44px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px}textarea{min-height:88px}
+label{display:block;font-size:var(--small);color:var(--muted);margin-bottom:var(--s4)}label input,label select,label textarea{margin-top:var(--s1)}
+.check{display:flex;gap:var(--s2);align-items:center}.check input{width:20px;min-height:20px}
+table{width:100%;border-collapse:collapse;font-size:var(--small)}th,td{text-align:left;padding:var(--s3);border-bottom:1px solid var(--border);vertical-align:top}th{color:var(--muted);font-weight:500}.table-wrap{overflow:auto}td code{overflow-wrap:anywhere}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--bg);border:1px solid var(--border);padding:var(--s4);border-radius:4px;font-size:var(--small)}code{font-size:var(--small)}
+.error{color:var(--danger);white-space:pre-wrap;overflow-wrap:anywhere}.notice{padding:var(--s4);background:var(--bg)}.toolbar{display:flex;gap:var(--s3);flex-wrap:wrap;margin:var(--s4) 0}
+.skip{position:absolute;top:-80px}.skip:focus{top:0;background:var(--panel);padding:var(--s4)}:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+dialog{max-width:480px;background:var(--panel);color:var(--text);border:1px solid var(--border);padding:var(--s6);border-radius:6px}dialog::backdrop{background:#0008}dialog form{display:flex;justify-content:end;gap:var(--s3)}
+details{margin:var(--s4) 0}summary{cursor:pointer;min-height:44px}progress{width:100%}
+@media(max-width:600px){main{padding:var(--s6) var(--s4)}header{gap:var(--s4);padding:var(--s3) var(--s4)}nav{order:3;width:100%;font-size:var(--small)}header>button{margin-left:auto}.row{display:block}section{padding:var(--s4)}}
+@media(prefers-reduced-motion:no-preference){button,a{transition:opacity .15s}button:hover{opacity:.85}}
+[hidden]{display:none!important}

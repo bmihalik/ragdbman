@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+[Unit]
+Description=ragdbman Python document intelligence service
+After=network.target
+
+[Service]
+Type=simple
+# Install the source at ~/.local/share/ragdbman-app and run uv sync first.
+WorkingDirectory=%h/.local/share/ragdbman-app
+ExecStart=%h/.local/share/ragdbman-app/.venv/bin/ragdbman serve --config %h/.config/ragdbman/config.toml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
+# Protected environment file for RAGDBMAN_AUTH_TOKEN and RAGDBMAN_QUERY_TOKEN.
+# Required for MCP access; use different secrets and chmod 600 on this file.
+# EnvironmentFile=%h/.config/ragdbman/environment
+
+[Install]
+WantedBy=default.target

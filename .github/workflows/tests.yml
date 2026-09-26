@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+name: Python tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        pdf: ["base", "pymupdf"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - if: matrix.pdf == 'base'
+        run: uv sync --locked
+      - if: matrix.pdf == 'pymupdf'
+        run: uv sync --locked --extra pymupdf
+      - run: uv run --no-sync pytest
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: uv run --no-sync python tools/license_headers.py
+      - if: matrix.pdf == 'base'
+        run: uv run --no-sync python -c "import importlib.util; assert importlib.util.find_spec('pymupdf') is None"
+      - run: uv build

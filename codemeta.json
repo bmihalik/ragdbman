@@ -1,0 +1,27 @@
+{
+  "@context": "https://w3id.org/codemeta/3.1",
+  "@type": "SoftwareSourceCode",
+  "name": "ragdbman",
+  "description": "An inspectable local document intelligence system in Python, with independent document, source-code and Knowledge Cards collections, SQLite full-text and vector retrieval, Ollama embeddings, and separate operational and administrative corpus MCP interfaces.",
+  "softwareVersion": "0.4.1",
+  "dateModified": "2026-09-26",
+  "license": "https://spdx.org/licenses/Apache-2.0",
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Bela Istvan",
+      "familyName": "MIHALIK"
+    }
+  ],
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python >=3.11",
+  "keywords": [
+    "retrieval-augmented generation",
+    "document intelligence",
+    "Knowledge Cards",
+    "Model Context Protocol",
+    "SQLite",
+    "vector search",
+    "Python"
+  ]
+}

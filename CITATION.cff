@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
+# SPDX-License-Identifier: Apache-2.0
+
+cff-version: 1.2.0
+message: >-
+  If you use ragdbman in your work, please cite this software using the
+  metadata in this file. See AUTHORS.md for human and AI-assisted contributions.
+type: software
+title: ragdbman
+authors:
+  - family-names: MIHALIK
+    given-names: Bela Istvan
+version: "0.4.1"
+date-released: "2026-09-26"
+license: Apache-2.0
+abstract: >-
+  An inspectable local document intelligence system in Python, with independent
+  document, source-code and Knowledge Cards collections, SQLite full-text and
+  vector retrieval, Ollama embeddings, and separate operational and administrative
+  corpus MCP interfaces.
+keywords:
+  - retrieval-augmented generation
+  - document intelligence
+  - Knowledge Cards
+  - Model Context Protocol
+  - SQLite
+  - vector search
+  - Python
