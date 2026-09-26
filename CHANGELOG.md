@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.4
+
+- Add effective TRACE/DEBUG/VERBOSE and richer INFO/WARNING/ERROR diagnostics,
+  with CLI/environment/config precedence and stage/batch/queue/transaction timings.
+- Stop indexing and owned converter groups on the first console signal, before
+  HTTP/SSE drain; fix cleanup when an exited parent leaves descendants holding
+  pipes. Add an overall shutdown watchdog for non-cooperative native threads.
+- Batch keyword vocabulary SELECTs and bulk inserts, add the keyword-ID lookup
+  index, and refresh frequencies once at scan end rather than per scanned file.
+- Reuse one persistent collection writer and exclusively leased cached readers.
+  Use WAL synchronous=NORMAL with documented power-loss durability limitations.
+- Run bounded file pipelines (default four) with a separately bounded Ollama
+  semaphore. Keep atomic source replacement, cancellation cleanup, partial-failure
+  handling and PyMuPDF serialization.
+- Add actual SIGINT/SSE/descendant-process tests and a reproducible local benchmark.
+
 ## 0.4.3
 
 - Preserve job-panel DOM nodes during live updates so inspection details stay

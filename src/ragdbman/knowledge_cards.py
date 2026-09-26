@@ -129,13 +129,18 @@ def validate_vectors(vectors, count, dimensions):
         )
 
 
-def persist(path, source_id, source_path, root_id, digest, stat, raw, card, vectors, stop):
+def persist(
+    path, source_id, source_path, root_id, digest, stat, raw, card, vectors, stop, connection_factory=None
+):
     def check():
         if stop.is_set():
             raise RagError("JOB_CANCELLED", "Card index write cancelled")
 
     check()
-    with closing(db.connect(path)) as conn, db.transaction(conn):
+    with (
+        connection_factory() if connection_factory else closing(db.connect(path)) as conn,
+        db.transaction(conn),
+    ):
         if card is not None:
             duplicate = conn.execute("SELECT source_id FROM kc_cards WHERE id=?", (card["id"],)).fetchone()
             if duplicate and duplicate[0] != source_id:
@@ -210,9 +215,9 @@ def persist(path, source_id, source_path, root_id, digest, stat, raw, card, vect
         check()
 
 
-def retrieve(path, req, vector, settings, minimum, limit, rrf_k):
+def retrieve(path, req, vector, settings, minimum, limit, rrf_k, connection_factory=None):
     """Confidence threshold per channel; hybrid fuses surviving ranks, not raw scores."""
-    with closing(db.connect(path)) as conn:
+    with connection_factory() if connection_factory else closing(db.connect(path)) as conn:
         # One snapshot prevents a concurrent card replacement mixing metadata and vectors.
         conn.execute("BEGIN")
         cards = {

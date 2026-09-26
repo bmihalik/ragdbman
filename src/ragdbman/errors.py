@@ -4,6 +4,7 @@
 """Stable error codes shared by CLI, REST, and MCP."""
 
 STATUS = {
+    "SERVER_SHUTTING_DOWN": 503,
     "CONFIG_INVALID": 400,
     "COLLECTION_NOT_FOUND": 404,
     "COLLECTION_BUSY": 409,

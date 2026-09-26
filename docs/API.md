@@ -59,7 +59,7 @@ Job REST responses, `corpus_job` replies and SSE `progress` events include:
 - `progress.processed`: completed + unchanged + failed + skipped.
 - `progress.percent`: processed/total × 100; null until meaningful. A completed
   empty scan reports 100%; cancelled or failed scans retain partial progress.
-- `progress.phase`: queued, discovering, indexing, pruning, finished, paused,
+- `progress.phase`: queued, discovering, indexing, pruning, finalizing, finished, paused,
   cancelled or failed.
 - `timing.elapsed_seconds`: current-attempt elapsed time, frozen when stopped.
 - `timing.estimated_remaining_seconds`: average indexing seconds per processed
@@ -72,6 +72,12 @@ Progress can reach 100% of files while optional pruning is still running;
 Elapsed includes discovery, whereas the ETA rate begins after discovery.
 Resume rediscovers candidates and resets counters/timing for the new attempt.
 Estimates vary with document size and converter/model performance.
+
+`progress.processing` is the number of files currently in flight, not just a
+boolean; `progress.queued` counts candidates not yet started. `current_item`
+identifies a representative in-flight source. Multiple files can finish out of
+order. Phase `finalizing` indicates the final keyword-frequency refresh; its
+remaining-time estimate is unavailable even when all files are processed.
 
 ## Document-oriented REST search request
 

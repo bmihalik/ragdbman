@@ -4,6 +4,56 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.4.4
+
+Logging, shutdown and indexing optimizations were checked on Linux on
+26 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 396 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 396 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 398 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 396 passed, 2 optional tests skipped |
+
+Installed-wheel tests run outside the source directory. The 21 additional cases
+cover bounded file concurrency, one refresh per scan, batched vocabulary SQL and
+deduplication, WAL NORMAL, reader/writer reuse, fresh-reader responsiveness during
+a write transaction, metadata reuse, duplicate-card transactions, immediate
+cancel/shutdown, runtime limits, debug/trace/verbose output and payload suppression.
+Failure injection verifies that a failed final keyword refresh is reported as a
+failed job, with committed source data retained.
+
+Real subprocess tests launch `serve`, start a scan with an executable converter
+fixture whose parent exits but leaves a child holding output pipes, keep an SSE
+stream open, then send SIGINT. The daemon exits within the test's five-second
+bound, leaves no running fixture child, persists the job as paused, and does not
+use the emergency watchdog. Separate tests exercise converter timeout/cancellation
+and the forced deadline with a non-cooperative thread. These are Linux/POSIX
+fixture results, not certification of every external converter or platform.
+
+The optional Chromium job-inspection regression still passes. Ruff, formatting,
+license-header and build checks pass. In-process statement coverage is about 91%;
+the separately launched server/signal processes are tested but are not included
+in that in-process coverage percentage.
+
+### Observed local performance fixture
+
+One standalone run of `tools/benchmark_indexing.py` produced:
+
+| Fixture | Reference/serial | Batched/concurrent | Observation |
+| --- | --- | --- | --- |
+| 20,000 keyword links, 200 unique terms | 0.1213 s, 20,000 SELECTs | 0.0494 s, 1 SELECT | About 2.5× faster in this microbenchmark |
+| 32 sources, synthetic 40 ms embedding delay | 1.4485 s, one file in flight | 0.4309 s, four in flight | About 3.4× faster in this fixture |
+
+Both scan measurements use the new implementation with different concurrency
+settings; they are not an old-release versus new-release end-to-end comparison.
+The vocabulary fixture compares the reference per-term algorithm with the batch
+helper using the same data. Timings vary with machine/cache/load and do not
+measure real Ollama, GPU or scientific-PDF conversion throughput. No universal
+10–50× speedup is claimed. See [RUNTIME.md](RUNTIME.md) for operational and
+power-loss durability trade-offs.
+
 ## Version 0.4.3
 
 The job-inspection UI patch was checked on Linux on 26 September 2026 with

@@ -34,7 +34,7 @@ def test_defaults():
         {"server": {"allow_remote_bind": True}},
         {"server": {"bind": "0.0.0.0"}},
         {"search": {"default_top_k": 100}},
-        {"logging": {"level": "verbose"}},
+        {"logging": {"level": "chatty"}},
         {"storage": {"markdown_sidecar_dir_name": "../escape"}},
         {"storage": {"markdown_sidecar_dir_name": "."}},
         {"server": {"mcp_path": "/"}},

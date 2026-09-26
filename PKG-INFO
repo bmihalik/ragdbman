@@ -1,6 +1,6 @@
 Metadata-Version: 2.5
 Name: ragdbman
-Version: 0.4.3
+Version: 0.4.4
 Summary: Inspectable local document intelligence, SQLite retrieval, and MCP
 Author: Bela Istvan MIHALIK
 License-Expression: Apache-2.0
@@ -245,10 +245,37 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.3) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.4) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).
+
+## Runtime diagnostics and tuning
+
+Use `uv run ragdbman serve --log-level debug` for detailed stage and database
+timings, `--log-level trace` for queue/connection/keyword diagnostics, or
+`--log-level verbose` for per-file outcomes. The command-line level overrides
+`RAGDBMAN_LOG`, which overrides `[logging] level`.
+
+Scans default to four files in flight and the Ollama client defaults to four
+concurrent requests. Existing explicit settings of `1` are still honored.
+Merge these values into the corresponding TOML sections to enable both:
+
+```toml
+[defaults]
+max_concurrent_files = 4
+
+[ollama]
+max_concurrent_embedding_requests = 4
+```
+
+Vocabulary operations are batched, keyword frequencies refresh once per scan,
+and collections reuse a serialized SQLite writer plus cached readers. WAL
+`synchronous=NORMAL` improves throughput with a power-loss durability trade-off.
+Ctrl+C now stops active work and owned converter process groups before HTTP/SSE
+drain; a second signal or the overall shutdown deadline can force exit if a
+non-cooperative worker remains. See [runtime tuning and shutdown](docs/RUNTIME.md)
+for configuration, safeguards, limitations and reproducible benchmarks.
 
 ## Develop and test
 

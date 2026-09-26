@@ -82,6 +82,7 @@ async def test_malformed_card_is_reported_and_old_card_is_atomic(engine, source_
 
 
 async def test_duplicate_ids_are_rejected_without_replacing_first(engine, source_dir):
+    engine.config.defaults.max_concurrent_files = 1
     (source_dir / "one.yaml").write_text(yaml.safe_dump(card(), sort_keys=False))
     (source_dir / "two.yaml").write_text(yaml.safe_dump(card(title="Duplicate"), sort_keys=False))
     await create(engine, source_dir)

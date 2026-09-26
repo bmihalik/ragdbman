@@ -17,6 +17,7 @@ from uuid import uuid4
 
 import sqlite_vec
 
+from .diagnostics import TRACE
 from .errors import RagError
 from .metadata import SYSTEM_FIELDS
 
@@ -45,7 +46,8 @@ def insert(conn, table: str, record: dict):
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path), timeout=30, isolation_level=None)
+    # Connections are exclusively leased; they can move between reader threads.
+    conn = sqlite3.connect(str(path), timeout=30, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.enable_load_extension(True)
     try:
@@ -53,8 +55,10 @@ def connect(path: str | Path) -> sqlite3.Connection:
     finally:
         conn.enable_load_extension(False)
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
+    journal = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    log.debug("Opened SQLite database=%s journal=%s synchronous=NORMAL", path, journal)
     return conn
 
 
@@ -71,14 +75,15 @@ def transaction(conn):
 
 def initialize_schema(conn, kind: str | None = None):
     """Create the complete collection schema and seed built-in metadata fields."""
+    log.debug("Initializing collection schema kind=%s", kind or "general")
     conn.executescript(files(__package__).joinpath("schema.sql").read_text(encoding="utf-8"))
     with transaction(conn):
-        for name, (kind, aliases) in SYSTEM_FIELDS.items():
+        for name, (field_kind, aliases) in SYSTEM_FIELDS.items():
             conn.execute(
                 """INSERT OR IGNORE INTO metadata_fields
                 (id,canonical_name,display_name,value_type,aliases_json,created_at,is_system_field)
                 VALUES (?,?,?,?,?,?,1)""",
-                (uid(), name, name.replace("_", " ").title(), kind, json.dumps(aliases), now()),
+                (uid(), name, name.replace("_", " ").title(), field_kind, json.dumps(aliases), now()),
             )
     if kind == "knowledge_cards":
         from .knowledge_cards import initialize_schema as initialize_kc_schema
@@ -111,11 +116,44 @@ def delete_chunks(conn, source_id: str):
 
 
 def refresh_keywords(conn):
+    log.debug("Refreshing collection keyword frequencies")
     conn.execute("""UPDATE keywords SET chunk_frequency=(
         SELECT COUNT(*) FROM chunk_keywords ck WHERE ck.keyword_id=keywords.id),
         doc_frequency=(SELECT COUNT(DISTINCT c.source_id) FROM chunk_keywords ck
         JOIN chunks c ON c.id=ck.chunk_id WHERE ck.keyword_id=keywords.id)""")
     conn.execute("DELETE FROM keywords WHERE chunk_frequency=0")
+
+
+def batch_keywords(conn, chunk_terms):
+    """One bounded SELECT per vocabulary batch, then bulk vocabulary/link inserts."""
+    terms = sorted({term for _, values in chunk_terms for term in values})
+    ids = {}
+    selects = 0
+    for start in range(0, len(terms), 800):
+        batch = terms[start : start + 800]
+        ids.update(
+            (row["canonical_form"], row["id"])
+            for row in conn.execute(
+                "SELECT id,canonical_form FROM keywords WHERE canonical_form IN ("
+                + ",".join("?" for _ in batch)
+                + ")",
+                batch,
+            )
+        )
+        selects += 1
+    missing = [(uid(), term, term) for term in terms if term not in ids]
+    conn.executemany("INSERT INTO keywords(id,canonical_form,display_form) VALUES (?,?,?)", missing)
+    ids.update((term, identifier) for identifier, term, _ in missing)
+    links = [(chunk_id, ids[term]) for chunk_id, values in chunk_terms for term in dict.fromkeys(values)]
+    conn.executemany("INSERT INTO chunk_keywords(chunk_id,keyword_id) VALUES (?,?)", links)
+    log.log(
+        TRACE,
+        "Keyword batch terms=%d new=%d links=%d selects=%d",
+        len(terms),
+        len(missing),
+        len(links),
+        selects,
+    )
 
 
 def audit(conn, action, collection_id=None, source_id=None, job_id=None, detail=None):

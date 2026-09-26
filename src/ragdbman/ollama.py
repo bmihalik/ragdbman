@@ -4,13 +4,18 @@
 """Async Ollama /api/embed client with bounded concurrency and dimensional checks."""
 
 import asyncio
+import logging
 import math
+import time
 from typing import Protocol
 
 import httpx
 
 from .config import OllamaConfig
+from .diagnostics import TRACE
 from .errors import RagError
+
+log = logging.getLogger(__name__)
 
 
 class Embedder(Protocol):
@@ -43,6 +48,7 @@ class Ollama:
     ) -> list[list[float]]:
         vectors = []
         for offset in range(0, len(texts), self.config.embedding_batch_size):
+            started = time.monotonic()
             batch = texts[offset : offset + self.config.embedding_batch_size]
             payload = {
                 "model": model,
@@ -53,7 +59,14 @@ class Ollama:
             if model.startswith("bge-m3") and self.config.bge_m3_options:
                 payload["options"] = self.config.bge_m3_options
             try:
+                log.log(TRACE, "Embedding queued model=%s offset=%d items=%d", model, offset, len(batch))
                 async with self.semaphore:
+                    log.debug(
+                        "Embedding request model=%s items=%d queued=%.3fs",
+                        model,
+                        len(batch),
+                        time.monotonic() - started,
+                    )
                     response = await self.client.post("/api/embed", json=payload)
                 response.raise_for_status()
                 data = response.json()["embeddings"]
@@ -76,8 +89,17 @@ class Ollama:
                             f"Expected {expected_dimensions} dimensions, received {len(vector)}",
                         )
                 vectors.extend(data)
+                log.debug(
+                    "Embedding response model=%s items=%d dimensions=%d elapsed=%.3fs",
+                    model,
+                    len(data),
+                    expected_dimensions,
+                    time.monotonic() - started,
+                )
             except httpx.RequestError as exc:
+                log.error("Ollama transport failure model=%s error=%s", model, type(exc).__name__)
                 raise RagError("OLLAMA_UNAVAILABLE", f"Cannot reach Ollama: {exc}") from exc
             except (httpx.HTTPStatusError, ValueError, KeyError, TypeError) as exc:
+                log.error("Ollama embedding failure model=%s error=%s", model, type(exc).__name__)
                 raise RagError("EMBEDDING_FAILED", f"Invalid Ollama embedding response: {exc}") from exc
         return vectors

@@ -21,6 +21,8 @@ Run `uv run ragdbman init` to write the complete current defaults. The command r
 | `server.mcp_allowed_collections` | omitted | Query-profile allowlist; omitted permits explicit access to all, `[]` permits none |
 | `server.web_auth_mode` | `local` | `local`, `password`, or `oauth_proxy` |
 | `server.allow_remote_bind` | `false` | Non-loopback access requires this plus auth |
+| `server.shutdown_grace_seconds` | `5` | Uvicorn request-drain grace after stopping work |
+| `server.shutdown_timeout_seconds` | `30` | Overall first-signal deadline; must exceed request grace |
 | `security.allow_file_uri_links` | `true` | Include local file links in results |
 | `security.allow_http_source_urls` | `true` | Include persisted original URLs in results |
 | `security.allow_arbitrary_paths_from_mcp` | `false` | Bypass source-root allowlist across interfaces; strongly discouraged |
@@ -68,7 +70,7 @@ Paths expand `~`. External source paths must resolve inside an allowed root; man
 | `keep_alive` | `24h` |
 | `request_timeout_seconds` | `300` |
 | `embedding_batch_size` | `32` |
-| `max_concurrent_embedding_requests` | `1` |
+| `max_concurrent_embedding_requests` | `4` |
 | `health_check_seconds` | `30` |
 | `bge_m3_options` | `{}` |
 
@@ -90,6 +92,7 @@ num_ctx = 8192
 |---|---|
 | `chunk_size_tokens` / `chunk_overlap_tokens` | `256` / `64` |
 | `scan_batch_size` | `100` |
+| `max_concurrent_files` | `4` |
 | `max_file_size_mb` | `500` |
 | `recursive_scan` | `true` |
 | `follow_symlinks` | `false` |
@@ -101,7 +104,14 @@ num_ctx = 8192
 
 `[source_code]` defaults are `chunk_size_tokens=400` and `chunk_overlap_tokens=60`. Overlap must be nonnegative and smaller than size. An exact tokenizer is resolved for the actual collection model, not the global default.
 
-The worker processes one file at a time per collection; `scan_batch_size` is reserved and is not a concurrency control. The recursive scan request defaults to true and can explicitly override recursion. Derived extracted text is stored in the artifacts table when enabled; converter scratch files are cleaned up after each call regardless of the reserved `preserve_artifacts` setting. Persistent sidecars are controlled by the sidecar settings.
+One job owns a collection, with up to `max_concurrent_files` file pipelines in
+flight (1–32, default 4). The separate Ollama request limit also accepts 1–32 and
+applies across collections sharing the client. `scan_batch_size` controls the
+INFO progress-report interval; it is not the concurrency limit. The recursive
+request defaults to true and may explicitly override recursion. Derived text is
+stored in artifacts when enabled; converter scratch directories are cleaned up
+after normal/cancelled calls regardless of reserved `preserve_artifacts`.
+See [RUNTIME.md](RUNTIME.md) for shutdown deadlines and forced-exit limitations.
 
 ## Search
 
@@ -159,6 +169,17 @@ overridden there. Use only flags supported by your installed version.
 
 ## Logging
 
-`[logging] level` accepts `error`, `warn`, `info`, `debug`, or `trace`. `RAGDBMAN_LOG` overrides it; Python maps trace to debug.
+`[logging] level` accepts `critical`, `error`, `warning`/`warn`, `info`, `verbose`,
+`debug`, or `trace`. Command-line `--log-level` overrides `RAGDBMAN_LOG`, which
+overrides TOML. TRACE is a real level 5; VERBOSE is level 15, between DEBUG and INFO.
+Configuration updates existing root-handler thresholds as well as application
+logger levels, rather than relying on an inert `basicConfig` call.
 
-Debug logs include command arguments, resolved executable/shebang, return codes and bounded output excerpts. Noisy Python PDF-library warning/error events are summarized per extraction. Source-level warnings and durable job errors remain inspectable through the API and database.
+INFO logs startup/discovery/periodic progress/final results and cleanup. VERBOSE
+adds per-file outcomes; DEBUG adds extraction/chunking/write timings, embedding
+batch counts, queue wait and converter exit/byte counts. TRACE adds reader reuse
+and batched vocabulary metrics. Errors include tracebacks at DEBUG/TRACE.
+HTTP/MCP raw-payload debugging is not enabled; embeddings, document text and
+authorization headers are not intentionally logged. Filenames, paths and
+converter error diagnostics can still be sensitive. Protect captured logs.
+PDF dependency warning/error events remain summarized per extraction.

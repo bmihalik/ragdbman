@@ -63,6 +63,11 @@ remote CI run has already occurred.
 
 ## Browser QA inventory
 
+`test_performance_shutdown.py` includes real process/HTTP/SSE SIGINT checks and
+an isolated forced-deadline test. Run it on Linux for the procfs/process-group
+assertions. `uv run python tools/benchmark_indexing.py` runs the documented
+synthetic vocabulary and concurrency fixtures without Ollama or model downloads.
+
 With the JavaScript Playwright package and its Chromium browser installed,
 `node tests/browser_job_record.mjs` runs an isolated UI regression with synthetic
 job responses and a controlled SSE test double. It checks real mouse selection,

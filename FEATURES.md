@@ -99,6 +99,19 @@ Scans classify files as new, unchanged, changed, previously failed, unsupported 
 
 Only one scan/index mutation runs per collection. Job records, per-file records, progress and errors persist in SQLite. Interrupted jobs become paused and unfinished items retryable at restart. Explicit resume rescans and skips already indexed hashes; destructive work is never automatically replayed. Cancellation is cooperative and prevents the next source commit, but an in-flight converter or embedding request may finish before it is observed.
 
+Within a scan, a bounded file pipeline (default four) overlaps extraction and
+embedding. One persistent collection writer serializes index/status writes;
+cached read leases keep HTTP inspection independent of that writer. Keyword
+lookups and inserts are batched, and frequencies refresh once at the end of a
+scan rather than once per file. Standalone add/remove still refresh immediately.
+WAL NORMAL and its durability trade-off are described in [RUNTIME.md](docs/RUNTIME.md).
+
+Console SIGINT/SIGTERM cancels work before HTTP/SSE draining and kills owned
+POSIX converter groups even if the original process exited with descendants
+holding pipes. A configurable process-exit watchdog prevents non-cooperative
+threads from keeping `serve` alive forever. Graceful cleanup preserves commit
+boundaries; the forced deadline is an emergency exit, not successful completion.
+
 Extraction, sidecar handling, tokenization/chunking, index writes and pruning run
 outside the HTTP event loop so the overview and job controls remain available
 during those stages. Worker cancellation retains collection locks until cleanup

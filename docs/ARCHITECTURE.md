@@ -45,7 +45,13 @@ Failed processing records a durable error and marks the source failed. A later s
 
 Source and chunk tables are authoritative, and indexing keeps their FTS and vector records consistent within a transaction. Normal restarts leave stored source IDs, chunk IDs, embeddings, and search results intact; tests cover both fresh initialization and reopening populated databases.
 
-Each short operation opens a SQLite connection with foreign keys, WAL, a busy timeout, and the sqlite-vec extension. Long conversion/network work is performed outside write transactions. Do not run multiple daemon processes on the same data directory; in-process collection locks are not distributed leases.
+Collections keep one lazy writer connection on a dedicated single-thread executor
+and exclusively lease reusable read/control connections (up to eight cached idle
+readers). A single shared connection across readers and writers would break
+isolation or block live UI reads. Connections load sqlite-vec once and use foreign
+keys, WAL, `synchronous=NORMAL` and a busy timeout. Long conversion/network work
+occurs outside transactions. `connections.py` handles lifecycle and lease cleanup.
+Do not run multiple daemons on the same data directory; locks are not distributed.
 
 ## PDF dependency boundary
 
@@ -66,14 +72,19 @@ Ollama clients and collection locks stay on the main loop; they are never passed
 to converter event loops. Optional PyMuPDF extraction is serialized within an
 Engine because of its native process-global state.
 
-Hashing, tokenizer loading/chunking, transactional index writes and missing-source
-pruning run in worker threads. Every database writer creates and closes its own
-SQLite connection on that thread. Threads isolate blocking work, not machine
+Hashing and tokenizer/chunking run in worker threads. Index/status/job writes and
+pruning are serialized by the persistent collection writer; metadata preparation
+occurs outside its write transaction. Vocabulary lookups use bounded IN batches
+and bulk inserts; a keyword-ID index supports frequency refreshes. Refresh runs
+once when a scan ends, including partially completed scans, and during recovery
+of interrupted jobs; standalone add/remove operations refresh immediately.
+Threads isolate blocking work, not machine
 resource usage: large jobs can still compete for CPU, memory and disk. Large
 searches and explicit maintenance operations still need scale-focused profiling.
 
-Active mutations are serialized per collection. A repeated start-scan call returns
-the existing active scan. Thread-safe cancellation flags are checked during index
+One mutating job owns each collection; it runs a bounded TaskGroup of file
+pipelines with a semaphore. A repeated start-scan call returns the active scan.
+Distinct canonical paths may complete out of input order. Thread-safe cancellation flags are checked during index
 writes and before commit, so cancelled writes roll back. Cancellation waits for
 worker cleanup before releasing the collection lock; it cannot leave a detached
 writer modifying a collection after shutdown or deletion.
@@ -81,8 +92,12 @@ writer modifying a collection after shutdown or deletion.
 Interrupted jobs are paused at startup and require explicit resume; successful
 source hashes make replay incremental. Shutdown cancellation is forwarded to the
 converter's event loop, and converter processes are terminated as a group on
-POSIX. Ordinary Cancel is cooperative: an in-flight extraction may finish, but
-its index is not committed. The overview's Ollama health probe has a three-second
+POSIX, even when the immediate parent has exited and descendants retain pipes.
+Cancel propagates to active file tasks and drains worker cleanup; commits already
+completed remain intact. The CLI's ManagedServer begins cancellation at signal
+receipt before Uvicorn waits for HTTP streams, and applies a final process-exit
+deadline for non-cooperative threads. See [RUNTIME.md](RUNTIME.md).
+The overview's Ollama health probe has a three-second
 deadline, including time waiting for an embedding request slot.
 
 ## Retrieval path

@@ -64,6 +64,10 @@ class SecurityMiddleware:
             return await self.app(scope, receive, send)
         headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
         server = self.engine.config.server
+        if self.engine.shutting_down and scope["method"] not in {"GET", "HEAD"}:
+            return await JSONResponse({"code": "SERVER_SHUTTING_DOWN", "message": "Daemon is stopping"}, 503)(
+                scope, receive, send
+            )
         try:
             host = urlsplit("//" + headers.get("host", "")).hostname or ""
             origin = headers.get("origin")
@@ -345,7 +349,7 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
         engine.get_job(name, job_id)
 
         async def stream():
-            while not await request.is_disconnected():
+            while not engine.shutting_down and not await request.is_disconnected():
                 item = engine.get_job(name, job_id)
                 yield f"event: progress\ndata: {json.dumps(item)}\n\n"
                 if item["status"] not in {"running", "queued"}:

@@ -5,6 +5,7 @@
 
 import asyncio
 import threading
+from contextvars import copy_context
 
 
 async def _drain(task):
@@ -31,6 +32,18 @@ async def run_sync(function, *args, on_cancel=None):
         if on_cancel:
             on_cancel()
         await _drain(task)
+        raise
+
+
+async def run_executor(executor, function, *args, on_cancel=None):
+    context = copy_context()
+    future = asyncio.get_running_loop().run_in_executor(executor, context.run, function, *args)
+    try:
+        return await asyncio.shield(future)
+    except asyncio.CancelledError:
+        if on_cancel:
+            on_cancel()
+        await _drain(future)
         raise
 
 

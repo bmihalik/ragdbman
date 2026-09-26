@@ -178,6 +178,8 @@ CREATE TABLE IF NOT EXISTS chunk_keywords (
     PRIMARY KEY (chunk_id, keyword_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_chunk_keywords_keyword ON chunk_keywords(keyword_id);
+
 CREATE TABLE IF NOT EXISTS jobs (
     id              TEXT PRIMARY KEY,
     collection_id   TEXT NOT NULL,

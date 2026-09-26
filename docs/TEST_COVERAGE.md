@@ -21,6 +21,7 @@ compatibility with every real document, external tool version, or deployment.
 | Total/processed counts, percentage, ETA, empty scans, cancellation/resume and downtime-safe recovery | `test_scan_progress.py` |
 | Extensionless/unknown source text detection, Unicode, binary rejection, full validation and line chunking | `test_source_sniff.py` |
 | Job inspection expansion, text selection, keyboard focus and explicit snapshot refresh during live updates | `browser_job_record.mjs` (optional Chromium test, separate from pytest) |
+| WAL NORMAL, batched vocabulary, connection leases, bounded file pipelines, log levels, converter descendants, real SIGINT with SSE and forced deadline | `test_performance_shutdown.py` |
 
 Source-code collections are tested for the absence of sidecars across multiple
 input formats. General collections are separately tested for intentional

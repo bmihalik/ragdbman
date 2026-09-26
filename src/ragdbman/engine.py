@@ -4,7 +4,8 @@
 """Shared application service used by REST, MCP, and the CLI.
 
 SQLite writes are short transactions; extraction and network calls happen
-outside transactions. One mutation worker is allowed per collection.
+outside transactions. One mutating job owns each collection, with bounded
+file workers and one serialized persistent SQLite writer.
 """
 
 from __future__ import annotations
@@ -18,9 +19,11 @@ import mimetypes
 import re
 import shutil
 import threading
+import time
 from contextlib import closing, contextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 
 import sqlite_vec
@@ -28,7 +31,8 @@ import sqlite_vec
 from . import db
 from .chunking import Tokenizer, chunk_document, tokenizer_path
 from .config import GlobalConfig
-from .diagnostics import dependency_counts
+from .connections import CollectionDatabase
+from .diagnostics import VERBOSE, dependency_counts
 from .errors import RagError, require_confirmation
 from .extract import SUPPORTED, atomic_write, extension, extract
 from .extract.sniff import is_text_file
@@ -37,7 +41,7 @@ from .models import CreateCollection, KnowledgeCardSearchRequest, MultiSearchReq
 from .ollama import Embedder, Ollama
 from .scanner import classify, discover, sha256_file
 from .search import search
-from .workers import run_async, run_sync
+from .workers import _drain, run_async, run_executor, run_sync
 
 log = logging.getLogger(__name__)
 PROGRESS = dict(
@@ -67,6 +71,11 @@ class Engine:
         self.tasks: dict[str, asyncio.Task] = {}
         self.active: dict[str, str] = {}
         self.cancel_flags: dict[str, threading.Event] = {}
+        self.operation_tasks = set()
+        self.shutting_down = False
+        self.closed = False
+        self._databases = {}
+        self._database_lock = threading.Lock()
         # PyMuPDF uses process-global native state; do not parse two PDFs in
         # different worker threads at the same time within this engine.
         self.pdf_lock = asyncio.Lock()
@@ -74,6 +83,12 @@ class Engine:
         self.registry: dict[str, dict] = {}
         self.repair_registry()
         self.recover()
+        log.info(
+            "Engine ready collections=%d file_concurrency=%d embedding_concurrency=%d",
+            len(self.registry),
+            self.config.defaults.max_concurrent_files,
+            self.config.ollama.max_concurrent_embedding_requests,
+        )
 
     def _name(self, name: str):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
@@ -88,11 +103,18 @@ class Engine:
         path = self.db_path(name)
         if name not in self.registry or not path.is_file():
             raise RagError("COLLECTION_NOT_FOUND", name)
-        conn = db.connect(path)
-        try:
+        with self._database(name).connection() as conn:
             yield conn
-        finally:
-            conn.close()
+
+    def _database(self, name):
+        with self._database_lock:
+            if name not in self._databases:
+                self._databases[name] = CollectionDatabase(self.db_path(name))
+            return self._databases[name]
+
+    async def _write(self, collection, function, *args, on_cancel=None):
+        database = self._database(collection)
+        return await run_executor(database.executor, database.write, function, *args, on_cancel=on_cancel)
 
     def _save_registry(self):
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +147,9 @@ class Engine:
     def recover(self):
         for name in self.registry:
             with self.connection(name) as conn, db.transaction(conn):
+                interrupted = conn.execute(
+                    "SELECT 1 FROM jobs WHERE status IN ('running','queued') LIMIT 1"
+                ).fetchone()
                 conn.execute(
                     """UPDATE job_items SET stage='retryable',updated_at=? WHERE stage NOT IN
                     ('completed','failed','skipped')""",
@@ -140,6 +165,12 @@ class Engine:
                     datetime.now(timezone.utc) - timedelta(days=self.config.storage.audit_log_retention_days)
                 ).isoformat()
                 conn.execute("DELETE FROM audit_log WHERE created_at<?", (cutoff,))
+                if interrupted:
+                    db.refresh_keywords(conn)
+                    log.warning(
+                        "Recovered interrupted jobs collection=%s; keyword counts refreshed; explicit resume required",
+                        name,
+                    )
 
     def list_collections(self) -> list[dict]:
         return [self.get_collection(n) for n in sorted(self.registry)]
@@ -160,6 +191,7 @@ class Engine:
 
     async def create_collection(self, request: CreateCollection | None = None, **kwargs) -> dict:
         req = request or CreateCollection(**kwargs)
+        self._not_busy(req.name)
         self._name(req.name)
         if req.name in self.registry or self.db_path(req.name).exists():
             raise RagError("CONFIG_INVALID", f"Collection {req.name} already exists")
@@ -196,6 +228,7 @@ class Engine:
         # Probe before creating anything. Never publish a half-initialized collection.
         vector = (await self.embedder.embed(["ragdbman dimension probe"], model))[0]
         dimensions = len(vector)
+        self._not_busy(req.name)
         # Recheck after yielding to the network: a concurrent request may have won.
         if req.name in self.registry or self.db_path(req.name).exists():
             raise RagError("CONFIG_INVALID", f"Collection {req.name} already exists")
@@ -255,6 +288,8 @@ class Engine:
         return self.get_collection(req.name)
 
     def _not_busy(self, name):
+        if self.shutting_down:
+            raise RagError("SERVER_SHUTTING_DOWN", "The daemon is shutting down")
         if name in self.active or self.locks.get(name, asyncio.Lock()).locked():
             raise RagError("COLLECTION_BUSY", f"Collection {name} has an active mutation")
 
@@ -284,6 +319,9 @@ class Engine:
                 )
                 + "\n"
             )
+        database = self._databases.pop(name, None)
+        if database:
+            database.close()
         if delete_files:
             shutil.rmtree(path.parent)
         else:
@@ -368,11 +406,20 @@ class Engine:
 
     async def add_file(self, collection: str, path: str, origin: str = "filesystem"):
         self._not_busy(collection)
-        async with self.locks.setdefault(collection, asyncio.Lock()):
-            return await self._index(collection, Path(path), origin=origin)
+        task = asyncio.current_task()
+        self.operation_tasks.add(task)
+        try:
+            async with self.locks.setdefault(collection, asyncio.Lock()):
+                return await self._index(collection, Path(path), origin=origin)
+        finally:
+            self.operation_tasks.discard(task)
 
-    async def _index(self, collection: str, path: Path, origin="filesystem", root_id=None, job_id=None):
-        meta = self.get_collection(collection)
+    async def _index(
+        self, collection: str, path: Path, origin="filesystem", root_id=None, job_id=None, meta=None
+    ):
+        started = time.monotonic()
+        log.debug("Index start collection=%s job=%s path=%s", collection, job_id, path)
+        meta = meta if meta is not None else self.get_collection(collection)
         path = self.config.checked_path(path, meta["managed_root"])
         if self.config.storage.markdown_sidecar_dir_name in path.parts:
             raise RagError("PATH_NOT_ALLOWED", "Sidecar output is never indexed as an original source")
@@ -386,6 +433,214 @@ class Engine:
         supported = ext in {"yaml", "yml"} if meta["kind"] == "knowledge_cards" else ext in SUPPORTED
         if not supported and meta["kind"] == "source_code":
             supported = await run_sync(is_text_file, path)
+        prepared = await self._write(
+            collection,
+            self._prepare_source,
+            collection,
+            meta,
+            path,
+            origin,
+            root_id,
+            digest,
+            ext,
+            supported,
+            stat,
+        )
+        source_id, classification = prepared["source_id"], prepared["classification"]
+        if prepared["skipped"]:
+            log.log(
+                VERBOSE,
+                "Index skipped collection=%s source=%s reason=%s",
+                collection,
+                path.name,
+                classification,
+            )
+            return prepared
+        try:
+            if meta["kind"] == "knowledge_cards":
+                from functools import partial
+
+                from .knowledge_cards import fields, persist, read_card, validate_vectors
+
+                raw, card = await run_sync(read_card, path)
+                if card is None:
+                    vectors = []
+                else:
+                    card_fields = fields(card)
+                    vectors = await self.embedder.embed(
+                        list(card_fields.values()),
+                        meta["embedding"]["model"],
+                        meta["embedding"]["dimensions"],
+                        meta["embedding"]["keep_alive"],
+                    )
+                    validate_vectors(vectors, len(card_fields), meta["embedding"]["dimensions"])
+                if await asyncio.to_thread(sha256_file, path) != digest:
+                    raise RagError("EXTRACTION_FAILED", "Source changed during indexing; rescan to retry")
+                stop = self.cancel_flags[job_id] if job_id else threading.Event()
+                await self._write(
+                    collection,
+                    persist,
+                    self.db_path(collection),
+                    source_id,
+                    path,
+                    root_id,
+                    digest,
+                    stat,
+                    raw,
+                    card,
+                    vectors,
+                    stop,
+                    partial(self.connection, collection),
+                    on_cancel=stop.set,
+                )
+                log.log(
+                    VERBOSE,
+                    "Card indexed collection=%s source=%s fields=%d elapsed=%.3fs",
+                    collection,
+                    path.name,
+                    len(vectors),
+                    time.monotonic() - started,
+                )
+                return {
+                    "source_id": source_id,
+                    "chunks": 0,
+                    "classification": classification if card is not None else "not_a_card",
+                    "skipped": card is None,
+                }
+            extracted_at = time.monotonic()
+            with dependency_counts() as counts:
+                if ext == "pdf" and self.config.media.pdf_backend == "pymupdf":
+                    async with self.pdf_lock:
+                        document, markdown_path = await run_async(extract, path, self.config, meta["kind"])
+                else:
+                    document, markdown_path = await run_async(extract, path, self.config, meta["kind"])
+            log.debug(
+                "Extracted collection=%s source=%s extractor=%s chars=%d elapsed=%.3fs",
+                collection,
+                path.name,
+                document.extractor_name,
+                len(document.full_text),
+                time.monotonic() - extracted_at,
+            )
+            if any(counts):
+                document.warnings.append(
+                    f"Extraction dependencies emitted {counts[0]} warnings and {counts[1]} errors"
+                )
+            if document.warnings:
+                log.warning(
+                    "Extraction warnings collection=%s source=%s: %s",
+                    collection,
+                    path.name,
+                    "; ".join(document.warnings)[:2000],
+                )
+            if not document.full_text.strip():
+                raise RagError("EXTRACTION_FAILED", "Extraction produced no text")
+            tokenizer, chunks = await run_sync(self._chunk, document, meta)
+            log.debug(
+                "Chunked collection=%s source=%s chunks=%d tokenizer=%s",
+                collection,
+                path.name,
+                len(chunks),
+                tokenizer.mode,
+            )
+            await self._write(collection, self._source_status, collection, source_id, "embedding", None)
+            embeddings = await self.embedder.embed(
+                [c.text for c in chunks],
+                meta["embedding"]["model"],
+                meta["embedding"]["dimensions"],
+                meta["embedding"]["keep_alive"],
+            )
+            if len(embeddings) != len(chunks) or any(
+                len(v) != meta["embedding"]["dimensions"] or not all(math.isfinite(n) for n in v)
+                for v in embeddings
+            ):
+                raise RagError("VECTOR_SCHEMA_MISMATCH", "Embedding count/dimension mismatch")
+            if job_id and self.cancel_flags[job_id].is_set():
+                raise RagError("JOB_CANCELLED", job_id)
+            if await asyncio.to_thread(sha256_file, path) != digest:
+                raise RagError("EXTRACTION_FAILED", "Source changed during indexing; rescan to retry")
+            stop = self.cancel_flags[job_id] if job_id else threading.Event()
+            await self._write(
+                collection,
+                self._persist_index,
+                collection,
+                meta,
+                path,
+                source_id,
+                root_id,
+                digest,
+                stat,
+                document,
+                markdown_path,
+                tokenizer.mode,
+                chunks,
+                embeddings,
+                stop,
+                job_id is None,
+                on_cancel=stop.set,
+            )
+            log.log(
+                VERBOSE,
+                "Indexed collection=%s source=%s chunks=%d elapsed=%.3fs",
+                collection,
+                path.name,
+                len(chunks),
+                time.monotonic() - started,
+            )
+            return {
+                "source_id": source_id,
+                "chunks": len(chunks),
+                "classification": classification,
+                "skipped": False,
+            }
+        except BaseException as exc:
+            if (
+                meta["kind"] == "source_code"
+                and ext not in SUPPORTED
+                and isinstance(exc, RagError)
+                and exc.code == "UNSUPPORTED_MEDIA_TYPE"
+            ):
+                await self._write(
+                    collection, self._source_status, collection, source_id, "unsupported", str(exc)
+                )
+                return {"source_id": source_id, "chunks": 0, "classification": "unsupported", "skipped": True}
+            await self._write(collection, self._index_failure, collection, source_id, job_id, exc)
+            raise
+
+    def _source_status(self, collection, source_id, status, detail):
+        with self.connection(collection) as conn:
+            conn.execute(
+                "UPDATE sources SET status=?,status_detail=?,updated_at=? WHERE id=?",
+                (status, detail, db.now(), source_id),
+            )
+
+    def _index_failure(self, collection, source_id, job_id, exc):
+        self._source_status(collection, source_id, "failed", str(exc) or type(exc).__name__)
+        with self.connection(collection) as conn:
+            db.insert(
+                conn,
+                "errors",
+                dict(
+                    id=db.uid(),
+                    job_id=job_id,
+                    source_id=source_id,
+                    error_code=getattr(exc, "code", "EXTRACTION_FAILED"),
+                    message=str(exc) or type(exc).__name__,
+                    created_at=db.now(),
+                ),
+            )
+        if isinstance(exc, asyncio.CancelledError) or getattr(exc, "code", "") == "JOB_CANCELLED":
+            log.debug("Index interrupted collection=%s source=%s", collection, source_id)
+        else:
+            log.error(
+                "Index failed collection=%s source=%s error=%s",
+                collection,
+                source_id,
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__) if log.isEnabledFor(logging.DEBUG) else None,
+            )
+
+    def _prepare_source(self, collection, meta, path, origin, root_id, digest, ext, supported, stat):
         with self.connection(collection) as conn:
             existing_row = conn.execute(
                 "SELECT * FROM sources WHERE canonical_path=? AND deleted_at IS NULL", (str(path),)
@@ -441,133 +696,7 @@ class Engine:
             conn.execute(
                 "UPDATE sources SET status='extracting',updated_at=? WHERE id=?", (db.now(), source_id)
             )
-        try:
-            if meta["kind"] == "knowledge_cards":
-                from .knowledge_cards import fields, persist, read_card, validate_vectors
-
-                raw, card = await run_sync(read_card, path)
-                if card is None:
-                    vectors = []
-                else:
-                    card_fields = fields(card)
-                    vectors = await self.embedder.embed(
-                        list(card_fields.values()),
-                        meta["embedding"]["model"],
-                        meta["embedding"]["dimensions"],
-                        meta["embedding"]["keep_alive"],
-                    )
-                    validate_vectors(vectors, len(card_fields), meta["embedding"]["dimensions"])
-                if await asyncio.to_thread(sha256_file, path) != digest:
-                    raise RagError("EXTRACTION_FAILED", "Source changed during indexing; rescan to retry")
-                stop = self.cancel_flags[job_id] if job_id else threading.Event()
-                await run_sync(
-                    persist,
-                    self.db_path(collection),
-                    source_id,
-                    path,
-                    root_id,
-                    digest,
-                    stat,
-                    raw,
-                    card,
-                    vectors,
-                    stop,
-                    on_cancel=stop.set,
-                )
-                return {
-                    "source_id": source_id,
-                    "chunks": 0,
-                    "classification": classification if card is not None else "not_a_card",
-                    "skipped": card is None,
-                }
-            with dependency_counts() as counts:
-                if ext == "pdf" and self.config.media.pdf_backend == "pymupdf":
-                    async with self.pdf_lock:
-                        document, markdown_path = await run_async(extract, path, self.config, meta["kind"])
-                else:
-                    document, markdown_path = await run_async(extract, path, self.config, meta["kind"])
-            if any(counts):
-                document.warnings.append(
-                    f"Extraction dependencies emitted {counts[0]} warnings and {counts[1]} errors"
-                )
-            if not document.full_text.strip():
-                raise RagError("EXTRACTION_FAILED", "Extraction produced no text")
-            tokenizer, chunks = await run_sync(self._chunk, document, meta)
-            with self.connection(collection) as conn:
-                conn.execute(
-                    "UPDATE sources SET status='embedding',updated_at=? WHERE id=?", (db.now(), source_id)
-                )
-            embeddings = await self.embedder.embed(
-                [c.text for c in chunks],
-                meta["embedding"]["model"],
-                meta["embedding"]["dimensions"],
-                meta["embedding"]["keep_alive"],
-            )
-            if len(embeddings) != len(chunks) or any(
-                len(v) != meta["embedding"]["dimensions"] or not all(math.isfinite(n) for n in v)
-                for v in embeddings
-            ):
-                raise RagError("VECTOR_SCHEMA_MISMATCH", "Embedding count/dimension mismatch")
-            if job_id and self.cancel_flags[job_id].is_set():
-                raise RagError("JOB_CANCELLED", job_id)
-            # Detect edits during conversion/embedding before committing the index.
-            if await asyncio.to_thread(sha256_file, path) != digest:
-                raise RagError("EXTRACTION_FAILED", "Source changed during indexing; rescan to retry")
-            stop = self.cancel_flags[job_id] if job_id else threading.Event()
-            await run_sync(
-                self._persist_index,
-                collection,
-                meta,
-                path,
-                source_id,
-                root_id,
-                digest,
-                stat,
-                document,
-                markdown_path,
-                tokenizer.mode,
-                chunks,
-                embeddings,
-                stop,
-                on_cancel=stop.set,
-            )
-            return {
-                "source_id": source_id,
-                "chunks": len(chunks),
-                "classification": classification,
-                "skipped": False,
-            }
-        except BaseException as exc:
-            if (
-                meta["kind"] == "source_code"
-                and ext not in SUPPORTED
-                and isinstance(exc, RagError)
-                and exc.code == "UNSUPPORTED_MEDIA_TYPE"
-            ):
-                with self.connection(collection) as conn:
-                    conn.execute(
-                        "UPDATE sources SET status='unsupported',status_detail=?,updated_at=? WHERE id=?",
-                        (str(exc), db.now(), source_id),
-                    )
-                return {"source_id": source_id, "chunks": 0, "classification": "unsupported", "skipped": True}
-            with self.connection(collection) as conn:
-                conn.execute(
-                    "UPDATE sources SET status='failed',status_detail=?,updated_at=? WHERE id=?",
-                    (str(exc) or type(exc).__name__, db.now(), source_id),
-                )
-                db.insert(
-                    conn,
-                    "errors",
-                    dict(
-                        id=db.uid(),
-                        job_id=job_id,
-                        source_id=source_id,
-                        error_code=getattr(exc, "code", "EXTRACTION_FAILED"),
-                        message=str(exc) or type(exc).__name__,
-                        created_at=db.now(),
-                    ),
-                )
-            raise
+        return {"source_id": source_id, "chunks": 0, "classification": classification, "skipped": False}
 
     def remove_source(
         self,
@@ -631,6 +760,12 @@ class Engine:
         return self.get_job(collection, job_id)
 
     def _launch(self, collection, job_id):
+        log.info(
+            "Starting job collection=%s job=%s file_concurrency=%d",
+            collection,
+            job_id,
+            self.config.defaults.max_concurrent_files,
+        )
         self.active[collection] = job_id
         self.cancel_flags[job_id] = threading.Event()
         self.tasks[job_id] = asyncio.create_task(self._scan(collection, job_id), name=f"scan:{collection}")
@@ -661,6 +796,37 @@ class Engine:
                 (*fields.values(), job_id),
             )
 
+    async def _publish_job(self, collection, job_id, **fields):
+        if "progress" in fields:
+            fields["progress"] = dict(fields["progress"])
+        await self._write(collection, partial(self._job_update, **fields), collection, job_id)
+
+    def _job_item(self, collection, item_id, job_id=None, path=None, **fields):
+        with self.connection(collection) as conn:
+            if job_id:
+                db.insert(
+                    conn,
+                    "job_items",
+                    dict(
+                        id=item_id,
+                        job_id=job_id,
+                        source_path=str(path),
+                        stage="hashing",
+                        created_at=db.now(),
+                        updated_at=db.now(),
+                    ),
+                )
+            else:
+                fields["updated_at"] = db.now()
+                conn.execute(
+                    "UPDATE job_items SET " + ",".join(f"{k}=?" for k in fields) + " WHERE id=?",
+                    (*fields.values(), item_id),
+                )
+
+    def _refresh_collection_keywords(self, collection):
+        with self.connection(collection) as conn, db.transaction(conn):
+            db.refresh_keywords(conn)
+
     async def _scan(self, collection, job_id):
         job = self.get_job(collection, job_id)
         params = job["params"]
@@ -669,17 +835,18 @@ class Engine:
         terminal = "completed"
         errors = []
         progress["phase"] = "discovering"
-        self._job_update(
-            collection,
-            job_id,
-            status="running",
-            started_at=db.now(),
-            finished_at=None,
-            error_summary=None,
-            progress=progress,
-        )
         try:
+            await self._publish_job(
+                collection,
+                job_id,
+                status="running",
+                started_at=db.now(),
+                finished_at=None,
+                error_summary=None,
+                progress=progress,
+            )
             async with self.locks.setdefault(collection, asyncio.Lock()):
+                scan_meta = self.get_collection(collection)
                 if params.get("rebuild"):
                     with self.connection(collection) as conn:
                         paths = [
@@ -689,7 +856,7 @@ class Engine:
                             )
                         ]
                 else:
-                    yaml_only = self.get_collection(collection)["kind"] == "knowledge_cards"
+                    yaml_only = scan_meta["kind"] == "knowledge_cards"
                     paths = await asyncio.to_thread(
                         lambda: [
                             p
@@ -697,78 +864,119 @@ class Engine:
                             if not yaml_only or extension(p) in {"yaml", "yml"}
                         ]
                     )
+                paths = await run_sync(lambda: list(dict.fromkeys(p.resolve() for p in paths)))
                 progress.update(
                     total=len(paths),
                     discovered=len(paths),
                     phase="indexing",
                     processing_started_at=db.now(),
                 )
-                self._job_update(collection, job_id, progress=progress)
-                for path in paths:
-                    if self.cancel_flags[job_id].is_set():
-                        terminal = "cancelled"
-                        break
-                    seen.add(str(path.resolve()))
-                    progress["processing"] = 1
-                    item_id = db.uid()
-                    with self.connection(collection) as conn:
-                        db.insert(
-                            conn,
-                            "job_items",
-                            dict(
-                                id=item_id,
-                                job_id=job_id,
-                                source_path=str(path),
-                                stage="hashing",
-                                created_at=db.now(),
-                                updated_at=db.now(),
-                            ),
+                progress["queued"] = len(paths)
+                await self._publish_job(collection, job_id, progress=progress)
+                log.info("Discovered collection=%s job=%s total=%d", collection, job_id, len(paths))
+                iterator = iter(paths)
+                inflight = {}
+                semaphore = asyncio.Semaphore(self.config.defaults.max_concurrent_files)
+                last_logged = 0
+
+                async def publish():
+                    nonlocal last_logged
+                    done = sum(progress[k] for k in ("completed", "unchanged", "failed", "skipped"))
+                    progress["processing"] = len(inflight)
+                    progress["queued"] = max(0, len(paths) - done - len(inflight))
+                    await self._publish_job(
+                        collection,
+                        job_id,
+                        progress=progress,
+                        current_item=next(iter(inflight.values()), None),
+                    )
+                    if done > last_logged and (
+                        done - last_logged >= self.config.defaults.scan_batch_size or done == len(paths)
+                    ):
+                        log.info(
+                            "Job progress collection=%s job=%s processed=%d/%d in_flight=%d failed=%d",
+                            collection,
+                            job_id,
+                            done,
+                            len(paths),
+                            len(inflight),
+                            progress["failed"],
                         )
-                    self._job_update(collection, job_id, progress=progress, current_item=str(path))
-                    try:
-                        outcome = await self._index(
-                            collection, path, root_id=params["root_id"], job_id=job_id
-                        )
-                        if outcome["classification"] == "unchanged":
-                            progress["unchanged"] += 1
-                        elif outcome["skipped"]:
-                            progress["skipped"] += 1
-                        else:
-                            progress["completed"] += 1
-                        with self.connection(collection) as conn:
-                            conn.execute(
-                                """UPDATE job_items SET stage=?,classification=?,source_id=?,updated_at=?
-                                WHERE id=?""",
-                                (
-                                    "skipped" if outcome["skipped"] else "completed",
-                                    outcome["classification"],
-                                    outcome["source_id"],
-                                    db.now(),
+                        last_logged = done
+
+                async def worker():
+                    while not self.cancel_flags[job_id].is_set():
+                        path = next(iterator, None)
+                        if path is None:
+                            return
+                        async with semaphore:
+                            seen.add(str(path))
+                            item_id = db.uid()
+                            inflight[item_id] = str(path)
+                            await self._write(collection, self._job_item, collection, item_id, job_id, path)
+                            await publish()
+                            try:
+                                outcome = await self._index(
+                                    collection, path, root_id=params["root_id"], job_id=job_id, meta=scan_meta
+                                )
+                                key = (
+                                    "unchanged"
+                                    if outcome["classification"] == "unchanged"
+                                    else "skipped"
+                                    if outcome["skipped"]
+                                    else "completed"
+                                )
+                                progress[key] += 1
+                                await self._write(
+                                    collection,
+                                    partial(
+                                        self._job_item,
+                                        stage="skipped" if outcome["skipped"] else "completed",
+                                        classification=outcome["classification"],
+                                        source_id=outcome["source_id"],
+                                    ),
+                                    collection,
                                     item_id,
-                                ),
-                            )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as exc:
-                        if isinstance(exc, RagError) and exc.code == "JOB_CANCELLED":
-                            terminal = "cancelled"
-                            break
-                        progress["failed"] += 1
-                        errors.append(f"{path.name}: {exc}")
-                        with self.connection(collection) as conn:
-                            conn.execute(
-                                "UPDATE job_items SET stage='failed',error_message=?,updated_at=? WHERE id=?",
-                                (str(exc), db.now(), item_id),
-                            )
-                        log.warning("Index failed for %s: %s", path, exc)
-                    progress["processing"] = 0
-                    self._job_update(collection, job_id, progress=progress)
-                    await asyncio.sleep(0)
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as exc:
+                                if self.cancel_flags[job_id].is_set() or (
+                                    isinstance(exc, RagError) and exc.code == "JOB_CANCELLED"
+                                ):
+                                    return
+                                progress["failed"] += 1
+                                errors.append(f"{path.name}: {exc}")
+                                await self._write(
+                                    collection,
+                                    partial(self._job_item, stage="failed", error_message=str(exc)),
+                                    collection,
+                                    item_id,
+                                )
+                                log.warning(
+                                    "File failed collection=%s job=%s path=%s error=%s",
+                                    collection,
+                                    job_id,
+                                    path,
+                                    exc,
+                                )
+                            finally:
+                                inflight.pop(item_id, None)
+                            await publish()
+
+                # A fixed number of worker tasks avoids one task per path and TaskGroup
+                # drains all child cleanup before releasing collection mutation ownership.
+                async with asyncio.TaskGroup() as group:
+                    for _ in range(min(len(paths), self.config.defaults.max_concurrent_files)):
+                        group.create_task(worker())
+                if self.cancel_flags[job_id].is_set():
+                    terminal = "cancelled"
                 if params.get("prune_missing") and terminal != "cancelled":
                     progress["phase"] = "pruning"
-                    self._job_update(collection, job_id, progress=progress, current_item=None)
+                    await self._publish_job(collection, job_id, progress=progress, current_item=None)
                     stop = self.cancel_flags[job_id]
-                    await run_sync(
+                    await self._write(
+                        collection,
                         self._prune_missing,
                         collection,
                         params["root_id"],
@@ -780,7 +988,7 @@ class Engine:
                 if errors and terminal == "completed":
                     terminal = "completed_with_errors"
         except asyncio.CancelledError:
-            terminal = "paused"
+            terminal = "paused" if self.shutting_down else "cancelled"
         except Exception as exc:
             if isinstance(exc, RagError) and exc.code == "JOB_CANCELLED":
                 terminal = "cancelled"
@@ -790,25 +998,77 @@ class Engine:
                 log.exception("Scan worker failed")
         finally:
             progress["processing"] = 0
-            progress["phase"] = "finished" if terminal in {"completed", "completed_with_errors"} else terminal
-            self._job_update(
-                collection,
-                job_id,
-                status=terminal,
-                progress=progress,
-                current_item=None,
-                error_summary="\n".join(errors[-20:]) or None,
-                finished_at=db.now(),
+            progress["queued"] = max(
+                0,
+                (progress["total"] or 0)
+                - sum(progress[k] for k in ("completed", "unchanged", "failed", "skipped")),
             )
-            self.active.pop(collection, None)
-            self.cancel_flags.pop(job_id, None)
-            self.get_collection(collection)
-            self._save_registry()
+            progress["phase"] = "finished" if terminal in {"completed", "completed_with_errors"} else terminal
+
+            async def finalize():
+                try:
+                    if terminal in {"completed", "completed_with_errors"}:
+                        progress["phase"] = "finalizing"
+                        await self._publish_job(collection, job_id, progress=progress, current_item=None)
+                    # Includes partially committed work on cancellation and per-file failures.
+                    await self._write(collection, self._refresh_collection_keywords, collection)
+                    progress["phase"] = (
+                        "finished" if terminal in {"completed", "completed_with_errors"} else terminal
+                    )
+                    await self._publish_job(
+                        collection,
+                        job_id,
+                        status=terminal,
+                        progress=progress,
+                        current_item=None,
+                        error_summary="\n".join(errors[-20:]) or None,
+                        finished_at=db.now(),
+                    )
+                    self.get_collection(collection)
+                    self._save_registry()
+                    log.info(
+                        "Job finished collection=%s job=%s status=%s completed=%d unchanged=%d failed=%d skipped=%d",
+                        collection,
+                        job_id,
+                        terminal,
+                        progress["completed"],
+                        progress["unchanged"],
+                        progress["failed"],
+                        progress["skipped"],
+                    )
+                except Exception as exc:
+                    log.exception(
+                        "Job finalization failed collection=%s job=%s; committed source data retained",
+                        collection,
+                        job_id,
+                    )
+                    progress["phase"] = "failed"
+                    try:
+                        await self._publish_job(
+                            collection,
+                            job_id,
+                            status="failed",
+                            progress=progress,
+                            current_item=None,
+                            error_summary=f"Finalization failed: {exc}",
+                            finished_at=db.now(),
+                        )
+                    except Exception:
+                        log.exception("Cannot persist final failure collection=%s job=%s", collection, job_id)
+                finally:
+                    self.active.pop(collection, None)
+                    self.cancel_flags.pop(job_id, None)
+
+            await _drain(asyncio.create_task(finalize()))
 
     def cancel_job(self, job_id: str):
         flag = self.cancel_flags.get(job_id)
         if flag:
             flag.set()
+            task = self.tasks.get(job_id)
+            if task and not task.done():
+                task.get_loop().call_soon_threadsafe(task.cancel)
+            log.info("Cancellation requested job=%s", job_id)
             return {"cancel_requested": job_id}
         for name in self.registry:
             try:
@@ -921,6 +1181,7 @@ class Engine:
             minimum,
             limit,
             self.config.search.rrf_k,
+            partial(self.connection, req.collection),
         )
 
     async def search_multi(self, request: MultiSearchRequest | dict):
@@ -976,7 +1237,7 @@ class Engine:
             for source in db.rows(conn, "SELECT id FROM sources"):
                 db.delete_chunks(conn, source["id"])
             conn.execute("UPDATE sources SET status='queued',content_hash_sha256=NULL")
-            db.refresh_keywords(conn)
+            conn.execute("DELETE FROM keywords")
             db.audit(conn, "rebuild_collection", meta["id"])
         job_id = db.uid()
         with self.connection(collection) as conn:
@@ -1041,16 +1302,38 @@ class Engine:
         )
 
     async def close(self):
+        if self.closed:
+            return
+        self.request_shutdown()
         running = [task for task in self.tasks.values() if not task.done()]
-        for flag in self.cancel_flags.values():
-            flag.set()
-        for task in running:
-            task.cancel()
+        running.extend(
+            task for task in self.operation_tasks if task is not asyncio.current_task() and not task.done()
+        )
         if running:
             await asyncio.gather(*running, return_exceptions=True)
         close = getattr(self.embedder, "close", None)
         if close:
             await close()
+        for database in list(self._databases.values()):
+            await asyncio.to_thread(database.close)
+        self.closed = True
+        log.info("Engine shutdown complete; tasks, clients and collection connections closed")
+
+    def request_shutdown(self):
+        if self.shutting_down:
+            return
+        self.shutting_down = True
+        log.info(
+            "Shutdown requested jobs=%d active_operations=%d", len(self.active), len(self.operation_tasks)
+        )
+        for flag in self.cancel_flags.values():
+            flag.set()
+        for task in list(self.tasks.values()) + list(self.operation_tasks):
+            if not task.done():
+                task.get_loop().call_soon_threadsafe(task.cancel)
+        from .extract.process import terminate_all
+
+        terminate_all()
 
     def _chunk(self, document, meta):
         tokenizer = self._tokenizer(meta)
@@ -1073,7 +1356,6 @@ class Engine:
                         (db.now(), source["id"]),
                     )
                     db.audit(conn, "prune_missing", source_id=source["id"], job_id=job_id)
-            db.refresh_keywords(conn)
             if stop.is_set():
                 raise RagError("JOB_CANCELLED", job_id)
 
@@ -1092,6 +1374,7 @@ class Engine:
         chunks,
         embeddings,
         stop,
+        refresh=True,
     ):
         # The connection is created, used and closed on this worker thread.
         # The event-loop task keeps the collection lock until this returns.
@@ -1100,6 +1383,19 @@ class Engine:
                 raise RagError("JOB_CANCELLED", "Index write cancelled")
 
         check_cancel()
+        log.debug(
+            "Preparing index metadata collection=%s source=%s chunks=%d", collection, path.name, len(chunks)
+        )
+        # Metadata extraction does not hold a SQLite write transaction.
+        metadata = [
+            (
+                extract_facts(c.text, self.config.defaults.locale),
+                candidate_terms(c.text + " " + path.name + " " + (c.heading or "")),
+            )
+            for c in chunks
+        ]
+        keyword_links = []
+        started = time.monotonic()
         with self.connection(collection) as conn, db.transaction(conn):
             db.ensure_vectors(conn, meta["embedding"]["dimensions"])
             db.delete_chunks(conn, source_id)
@@ -1121,7 +1417,7 @@ class Engine:
                     ),
                 )
             fields = {r["canonical_name"]: r["id"] for r in db.rows(conn, "SELECT * FROM metadata_fields")}
-            for chunk, vector in zip(chunks, embeddings, strict=True):
+            for chunk, vector, (facts, terms) in zip(chunks, embeddings, metadata, strict=True):
                 check_cancel()
                 chunk_id = db.uid()
                 record = asdict(chunk)
@@ -1144,7 +1440,7 @@ class Engine:
                     "INSERT INTO chunks_fts(rowid,text,heading,section_path,filename) VALUES (?,?,?,?,?)",
                     (seq, chunk.text, chunk.heading, chunk.section_path, path.name),
                 )
-                for fact in extract_facts(chunk.text, self.config.defaults.locale):
+                for fact in facts:
                     db.insert(
                         conn,
                         "chunk_numeric_values",
@@ -1156,17 +1452,10 @@ class Engine:
                             **{k: v for k, v in fact.items() if k not in {"field", "kind"}},
                         },
                     )
-                for term in candidate_terms(chunk.text + " " + path.name + " " + (chunk.heading or "")):
-                    keyword = conn.execute(
-                        "SELECT id FROM keywords WHERE canonical_form=?", (term,)
-                    ).fetchone()
-                    keyword_id = keyword[0] if keyword else db.uid()
-                    if not keyword:
-                        db.insert(
-                            conn, "keywords", dict(id=keyword_id, canonical_form=term, display_form=term)
-                        )
-                    db.insert(conn, "chunk_keywords", dict(chunk_id=chunk_id, keyword_id=keyword_id))
-            db.refresh_keywords(conn)
+                keyword_links.append((chunk_id, terms))
+            db.batch_keywords(conn, keyword_links)
+            if refresh:
+                db.refresh_keywords(conn)
             db.insert(
                 conn,
                 "source_versions",
@@ -1202,3 +1491,10 @@ class Engine:
                 "UPDATE collection_meta SET tokenizer_mode=?,updated_at=?", (tokenizer_mode, db.now())
             )
             check_cancel()
+        log.debug(
+            "Committed index collection=%s source=%s chunks=%d transaction=%.3fs",
+            collection,
+            path.name,
+            len(chunks),
+            time.monotonic() - started,
+        )

@@ -28,6 +28,8 @@ class ServerConfig(Settings):
     mcp_allowed_collections: list[str] | None = None
     web_auth_mode: Literal["local", "password", "oauth_proxy"] = "local"
     allow_remote_bind: bool = False
+    shutdown_grace_seconds: float = Field(5, gt=0, allow_inf_nan=False)
+    shutdown_timeout_seconds: float = Field(30, gt=0, allow_inf_nan=False)
 
 
 class StorageConfig(Settings):
@@ -47,7 +49,7 @@ class OllamaConfig(Settings):
     keep_alive: str = "24h"
     request_timeout_seconds: float = Field(300, gt=0)
     embedding_batch_size: int = Field(32, ge=1)
-    max_concurrent_embedding_requests: int = Field(1, ge=1)
+    max_concurrent_embedding_requests: int = Field(4, ge=1, le=32)
     health_check_seconds: int = Field(30, ge=1)
     bge_m3_options: dict = Field(default_factory=dict)
 
@@ -56,6 +58,7 @@ class DefaultsConfig(Settings):
     chunk_size_tokens: int = Field(256, ge=1)
     chunk_overlap_tokens: int = Field(64, ge=0)
     scan_batch_size: int = Field(100, ge=1)
+    max_concurrent_files: int = Field(4, ge=1, le=32)
     max_file_size_mb: int = Field(500, ge=1)
     recursive_scan: bool = True
     follow_symlinks: bool = False
@@ -120,7 +123,7 @@ class SecurityConfig(Settings):
 
 
 class LoggingConfig(Settings):
-    level: Literal["error", "warn", "info", "debug", "trace"] = "info"
+    level: Literal["critical", "error", "warning", "warn", "info", "verbose", "debug", "trace"] = "info"
 
 
 class GlobalConfig(Settings):
@@ -136,6 +139,8 @@ class GlobalConfig(Settings):
 
     @model_validator(mode="after")
     def validate_relationships(self):
+        if self.server.shutdown_grace_seconds >= self.server.shutdown_timeout_seconds:
+            raise ValueError("shutdown_timeout_seconds must exceed shutdown_grace_seconds")
         for section in (self.defaults, self.source_code):
             if section.chunk_overlap_tokens >= section.chunk_size_tokens:
                 raise ValueError("chunk_overlap_tokens must be less than chunk_size_tokens")

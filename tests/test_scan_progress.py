@@ -76,6 +76,7 @@ def test_missing_total_and_timing_are_safe():
 
 
 async def test_total_visible_while_first_file_is_still_embedding(engine, fake, source_dir):
+    engine.config.defaults.max_concurrent_files = 1  # Deliberately isolate the first-file case.
     await engine.create_collection(name="progress")
     for name in ("a.txt", "b.txt", "c.bin"):
         (source_dir / name).write_text("Indexing progress is visible.")

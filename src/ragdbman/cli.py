@@ -5,6 +5,7 @@
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
@@ -53,6 +54,10 @@ def parser():
     for command in ("serve", "init", "registry-repair", "fetch-tokenizer"):
         item = sub.add_parser(command)
         item.add_argument("--config", default="~/.config/ragdbman/config.toml")
+        item.add_argument(
+            "--log-level",
+            choices=["trace", "debug", "verbose", "info", "warning", "warn", "error", "critical"],
+        )
         if command == "fetch-tokenizer":
             item.add_argument("--hf-repo", required=True)
             item.add_argument("--model")
@@ -68,7 +73,7 @@ def main(argv=None):
             init_config(Path(args.config))
             return
         config = GlobalConfig.load(args.config)
-        level = os.environ.get("RAGDBMAN_LOG", config.logging.level).upper()
+        level = (args.log_level or os.environ.get("RAGDBMAN_LOG", config.logging.level)).upper()
         configure_logging(level)
         if args.command == "fetch-tokenizer":
             dest = tokenizer_path(config.storage.data_dir, args.model or config.ollama.embedding_model)
@@ -86,16 +91,31 @@ def main(argv=None):
             print(f"Registry repaired: {len(engine.list_collections())} collection(s)")
             asyncio.run(engine.close())
         else:
+            from .server import ManagedServer
             from .web import create_app
 
-            uvicorn.run(
-                create_app(engine),
-                host=config.server.bind,
-                port=config.server.port,
-                log_level="debug" if level == "TRACE" else config.logging.level.replace("warn", "warning"),
-                proxy_headers=False,
+            server = ManagedServer(
+                uvicorn.Config(
+                    create_app(engine),
+                    host=config.server.bind,
+                    port=config.server.port,
+                    log_level="debug"
+                    if level in {"TRACE", "DEBUG"}
+                    else "info"
+                    if level in {"VERBOSE", "INFO"}
+                    else level.lower().replace("warn", "warning")
+                    if level == "WARN"
+                    else level.lower(),
+                    log_config=None,
+                    timeout_graceful_shutdown=config.server.shutdown_grace_seconds,
+                    proxy_headers=False,
+                ),
+                engine,
             )
-    except (RagError, OSError) as exc:
+            server.run()
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("Console shutdown complete")
+    except (RagError, OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
 

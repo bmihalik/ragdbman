@@ -8,6 +8,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 QUIET_DEPENDENCIES = ("pypdf", "pymupdf")
+TRACE = 5
+VERBOSE = 15
+logging.addLevelName(TRACE, "TRACE")
+logging.addLevelName(VERBOSE, "VERBOSE")
 _counts: ContextVar[list[int] | None] = ContextVar("dependency_log_counts", default=None)
 
 
@@ -25,15 +29,29 @@ class DependencySummary(logging.Filter):
 
 
 def configure_logging(level: str = "info"):
-    logging.basicConfig(
-        level={"TRACE": logging.DEBUG, "WARN": logging.WARNING}.get(level.upper(), level.upper()),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    numeric = {"TRACE": TRACE, "VERBOSE": VERBOSE, "WARN": logging.WARNING}.get(
+        level.upper(), getattr(logging, level.upper(), None)
     )
-    for handler in logging.getLogger().handlers:
+    if not isinstance(numeric, int):
+        raise ValueError(f"Unknown log level: {level}")
+    logging.basicConfig(
+        level=numeric,
+        format="%(asctime)s %(levelname)s %(name)s [%(threadName)s] %(message)s",
+    )
+    root = logging.getLogger()
+    root.setLevel(numeric)  # basicConfig is a no-op when a host already installed handlers.
+    logging.getLogger("ragdbman").setLevel(numeric)
+    for handler in root.handlers:
+        handler.setLevel(numeric)
         if not any(isinstance(f, DependencySummary) for f in handler.filters):
             handler.addFilter(DependencySummary())
     for noisy in ("httpx", "httpcore"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    # SDK DEBUG can include tool arguments; application TRACE is not HTTP/body tracing.
+    logging.getLogger("mcp").setLevel(logging.INFO)
+    logging.getLogger(__name__).debug(
+        "Application logging configured level=%s", logging.getLevelName(numeric)
+    )
 
 
 @contextmanager

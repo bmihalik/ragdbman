@@ -54,7 +54,7 @@ async def test_overview_and_cancel_respond_during_indexing(engine, source_dir, m
             monkeypatch.setattr(engine_module, "chunk_document", pause(engine_module.chunk_document))
         else:
             # Pause with the write transaction open, not just before it starts.
-            monkeypatch.setattr(db, "refresh_keywords", pause(db.refresh_keywords))
+            monkeypatch.setattr(db, "batch_keywords", pause(db.batch_keywords))
 
     app = create_app(engine, manage_engine=False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://testserver") as client:
@@ -141,14 +141,14 @@ async def test_shutdown_during_write_rolls_back_before_unlock(engine, source_dir
         original = db.rows(conn, "SELECT id,text FROM chunks")
     path.write_text("Replacement evidence. Price: EUR 25.")
     entered, release = threading.Event(), threading.Event()
-    refresh = db.refresh_keywords
+    batch = db.batch_keywords
 
-    def held(conn):
+    def held(conn, terms):
         entered.set()
         assert release.wait(5)
-        refresh(conn)
+        batch(conn, terms)
 
-    monkeypatch.setattr(db, "refresh_keywords", held)
+    monkeypatch.setattr(db, "batch_keywords", held)
     job = engine.start_scan("closing", str(source_dir))
     assert await asyncio.to_thread(entered.wait, 3)
     shutdown = asyncio.create_task(engine.close())
@@ -156,7 +156,7 @@ async def test_shutdown_during_write_rolls_back_before_unlock(engine, source_dir
         await asyncio.sleep(0.05)
         assert not shutdown.done()
         assert "closing" in engine.active
-        with pytest.raises(RagError, match="COLLECTION_BUSY"):
+        with pytest.raises(RagError, match="SERVER_SHUTTING_DOWN"):
             engine.delete_collection("closing", confirm=True)
     finally:
         release.set()
@@ -191,17 +191,17 @@ async def test_pruning_keeps_overview_responsive_and_cancel_rolls_back(engine, s
     source = engine.list_sources("pruning")[0]
     path.unlink()
     entered, release = threading.Event(), threading.Event()
-    refresh = db.refresh_keywords
+    delete = db.delete_chunks
     owner = threading.get_ident()
     threads = []
 
-    def held(conn):
+    def held(conn, source_id):
         threads.append(threading.get_ident())
         entered.set()
         assert release.wait(8)
-        refresh(conn)
+        delete(conn, source_id)
 
-    monkeypatch.setattr(db, "refresh_keywords", held)
+    monkeypatch.setattr(db, "delete_chunks", held)
     job = engine.start_scan("pruning", str(source_dir), prune_missing=True)
     try:
         assert await asyncio.to_thread(entered.wait, 10)
