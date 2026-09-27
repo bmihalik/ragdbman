@@ -28,6 +28,8 @@ AI-assisted implementation work.
   database definitions, extraction adapters, indexing and retrieval logic,
   command-line and service interfaces, administrative UI, and supporting tooling,
   including the Knowledge Cards implementation and deterministic scoring details.
+  Implemented Tree-sitter source graphs, provenance/recovery, search enrichment
+  and graph traversal under the owner's requested design.
 - **Automated testing and debugging:** Designed and generated test cases, executed
   automated suites and development-environment checks, investigated failures,
   and implemented corrections. Assisted with browser and packaging verification.

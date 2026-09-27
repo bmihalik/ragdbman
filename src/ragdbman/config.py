@@ -74,6 +74,16 @@ class SourceCodeConfig(Settings):
     chunk_overlap_tokens: int = Field(60, ge=0)
 
 
+class GraphConfig(Settings):
+    enabled: bool = True  # Source-code collections only.
+    max_file_size_mb: int = Field(4, ge=1, le=64)
+    max_entities_per_file: int = Field(5000, ge=1, le=50000)
+    max_relationships_per_file: int = Field(20000, ge=1, le=100000)
+    max_parse_nodes: int = Field(200000, ge=100, le=1000000)
+    parse_timeout_ms: int = Field(2000, ge=1, le=10000)
+    search_context_limit: int = Field(8, ge=1, le=50)
+
+
 class SearchConfig(Settings):
     default_top_k: int = Field(8, ge=1)
     max_top_k: int = Field(50, ge=1)
@@ -132,6 +142,7 @@ class GlobalConfig(Settings):
     ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     defaults: DefaultsConfig = Field(default_factory=DefaultsConfig)
     source_code: SourceCodeConfig = Field(default_factory=SourceCodeConfig)
+    graph: GraphConfig = Field(default_factory=GraphConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     media: MediaConfig = Field(default_factory=MediaConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)

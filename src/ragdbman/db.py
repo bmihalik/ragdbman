@@ -89,6 +89,10 @@ def initialize_schema(conn, kind: str | None = None):
         from .knowledge_cards import initialize_schema as initialize_kc_schema
 
         initialize_kc_schema(conn)
+    if kind == "source_code":
+        from .graph.store import initialize_primary
+
+        initialize_primary(conn)
 
 
 def ensure_vectors(conn, dimensions: int):
@@ -104,6 +108,10 @@ def ensure_vectors(conn, dimensions: int):
 
 
 def delete_chunks(conn, source_id: str):
+    from .graph.store import has_outbox, queue
+
+    if has_outbox(conn):
+        queue(conn, source_id)
     has_vectors = conn.execute("SELECT 1 FROM sqlite_master WHERE name='chunks_vec0'").fetchone()
     for row in conn.execute("SELECT seq FROM chunks WHERE source_id=?", (source_id,)).fetchall():
         conn.execute("DELETE FROM chunks_fts WHERE rowid=?", (row[0],))

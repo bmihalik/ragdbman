@@ -14,6 +14,7 @@ from .models import Request, SearchFilters, SearchRequest
 
 
 class CorpusQuery(Request):
+    include_graph_context: bool | None = None
     query: str = Field(min_length=1)
     collections: list[str] | None = None
     mode: Literal["keyword", "semantic", "hybrid"] = "hybrid"
@@ -63,6 +64,8 @@ def describe(engine, collections=None, admin=False):
                 modes=["keyword", "semantic", "hybrid"],
                 perspectives=["general", "expert"] if is_card else ["general"],
                 filters=[] if is_card else list(SearchFilters.model_fields),
+                graph_context=meta["kind"] == "source_code" and engine.config.graph.enabled,
+                graph_traversal=meta["kind"] == "source_code" and engine.config.graph.enabled,
             ),
         )
         if not catalog:
@@ -184,6 +187,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                         mode=mode,
                         top_k=engine.config.search.max_top_k,
                         filters=request.filters,
+                        include_graph_context=request.include_graph_context,
                     )
                 )
                 if response["skipped_filters"]:
@@ -228,6 +232,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                             },
                             content=m["text"],
                             truncated=m["truncated"],
+                            **({"graph_context": m["graph_context"]} if "graph_context" in m else {}),
                         )
                     )
             searched.append(name)
@@ -239,6 +244,9 @@ async def query(engine, request: CorpusQuery, admin=False):
                     minimum_score=minimum,
                     score_policy=score_policy,
                     filters=request.filters.model_dump(),
+                    include_graph_context=meta["kind"] == "source_code"
+                    and engine.config.graph.enabled
+                    and request.include_graph_context is not False,
                 )
             )
             for rank, result in enumerate(converted[:limit], 1):
@@ -305,6 +313,13 @@ def render(response):
             if item["kind"] == "knowledge_card"
             else fence(item["content"] or "", "text")
         )
+        if "graph_context" in item:
+            parts.extend(
+                [
+                    "### Static source graph context",
+                    fence(json.dumps(item["graph_context"], ensure_ascii=False, indent=2), "json"),
+                ]
+            )
     if not response["results"]:
         parts.append("No results met the requested scope, filters and relevance thresholds.")
     if response["warnings"]:

@@ -10,7 +10,7 @@ From the repository root:
 
 ```sh
 uv sync --locked
-uv run pytest -q --cov=ragdbman --cov-config=pyproject.toml --cov-report=term-missing
+uv run pytest -q --cov=src/ragdbman --cov-config=pyproject.toml --cov-report=term-missing
 uv run ruff check .
 uv run ruff format --check .
 uv build
@@ -34,6 +34,12 @@ A configured CI matrix is not a claim that a
 remote CI run has already occurred.
 
 ## Test boundaries
+
+Source-graph tests exercise the bundled native grammars without network downloads
+or LLM extraction. They include mocked graph-write failures and replay, current
+chunk provenance, and query-profile authorization. Run just that group with
+`uv run pytest tests/test_source_graph.py -q`. Successful fixtures do not imply
+complete compiler binding, dynamic-call coverage or production-scale throughput.
 
 - **Real dependencies:** SQLite extension loading, vector distances, FTS queries,
   schema initialization, transactions, tokenizers, XML/ZIP/Office parsers, pypdf extraction

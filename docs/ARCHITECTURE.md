@@ -21,6 +21,7 @@ The Python service is organized around a shared `Engine`. Transport code validat
 | Facts and keywords | `metadata.py` |
 | Scanning and indexing | `scanner.py`, extraction dispatcher, indexing/jobs in `engine.py` |
 | Retrieval | `search.py` |
+| Source syntax graphs | `graph/parser.py`, `graph/store.py`, `graph/query.py`, `graph/schema.sql` |
 | Shared application engine | `engine.py` |
 | Blocking-work isolation and cancellation cleanup | `workers.py` |
 | MCP interface | `mcp_server.py` |
@@ -36,6 +37,14 @@ The Python service is organized around a shared `Engine`. Transport code validat
 5. Embed via batched Ollama calls outside any SQLite write transaction.
 6. Verify count/dimensions, check cancellation, and verify the source did not change during processing.
 7. In one transaction, replace old chunks/FTS/vectors/facts, persist artifacts and a source version, and mark the source indexed.
+
+For source-code collections, Tree-sitter observations and AST boundaries are
+prepared off the HTTP event loop before embedding. The primary source transaction
+also writes a graph outbox event; after commit it is applied idempotently to the
+separate graph SQLite DB. Reads validate source hash/status and parser fingerprint,
+and resolve current chunk citations dynamically. Unchanged-file scans can backfill
+graphs without embedding. Graph writes are derived and retryable; their failure
+does not roll back an already committed document index. See [SOURCE_GRAPH.md](SOURCE_GRAPH.md).
 
 Failed processing records a durable error and marks the source failed. A later scan retries it even when its content hash has not changed.
 
@@ -105,6 +114,10 @@ deadline, including time waiting for an embedding request slot.
 Structured predicates narrow eligible chunk IDs. FTS5 supplies keyword ranks; sqlite-vec supplies exact vector distances. Hybrid fusion combines channel ranks, and multi-collection fusion combines independent collection ranks. Results include evidence and filter diagnostics rather than synthesized answers.
 
 Exact vector evaluation avoids returning too few matches because a selective filter was applied after a small KNN candidate set. This trades throughput for completeness and should be benchmarked before very large deployments.
+
+Source-code search enrichment and `corpus_graph` use read snapshots and bounded
+traversal in worker threads. They do not parse or flush pending writes. Scores
+and search ordering remain unchanged, and graph failure preserves normal hits.
 
 ## Extension points
 

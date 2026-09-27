@@ -4,6 +4,47 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.5.0
+
+Source-graph implementation and release packaging were checked on Linux on
+26 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 431 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 431 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 433 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 431 passed, 2 optional tests skipped |
+
+The 35 graph cases exercise actual installed Tree-sitter grammars for Python,
+Rust, C, C++, JavaScript, TypeScript, TSX, Go, Java and C#. They cover cross-file
+aliases/relative imports, trait implementation, inheritance, qualified bases,
+metaclasses, mixed-language isolation, common shadowing, ambiguity, cycles,
+limits, Unicode, syntax errors and unsupported formats.
+
+Integration cases cover automatic enrichment and opt-out, readable MCP output,
+authorized REST/MCP traversal and denied collection scope, stable source IDs,
+fresh chunk citations after reindexing, stale-hit suppression, removal/pruning,
+rebuild/deletion, unchanged backfill without embedding, graph-only failure
+isolation, durable outbox replay and graph-commit-before-ack restart recovery.
+The existing shutdown, concurrency, Knowledge Cards, extraction and UI API
+regression tests remain in the complete suite.
+
+Final matrix runs were serial to avoid competing process-timing fixtures.
+An initial concurrent run of the optional profile hit two immediate
+descendant-exit assertions; isolated complete reruns passed, including the
+real SIGINT/SSE/converter-descendant tests. These tests remain Linux/POSIX
+fixture checks, not verification of arbitrary external programs.
+
+Ruff and first-party license-header checks pass. In-process statement coverage
+is approximately 91% overall and 88% for the graph modules. Separately spawned
+daemon processes are tested but not included in that coverage measurement.
+Installed-wheel suites run from outside the source directory and exercise the
+packaged graph SQL resource. Embedding tests use deterministic doubles; no
+claim is made about real Ollama throughput, production repository completeness,
+or compiler-accurate target resolution. The existing MinerU 3.4.5 real-environment
+acceptance target is unchanged.
+
 ## Version 0.4.4
 
 Logging, shutdown and indexing optimizations were checked on Linux on

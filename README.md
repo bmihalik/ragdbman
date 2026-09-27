@@ -2,7 +2,30 @@
 
 An inspectable, local document intelligence system, implemented in Python. Organize named collections, follow indexing jobs, inspect Markdown sidecars and SQLite records, and retrieve source-backed evidence through MCP, REST, or the administrative UI.
 
-Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: two operational tools, with three additional administrative tools available separately.
+Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: three operational tools, with three additional administrative tools available separately.
+
+## Source-code knowledge graphs
+
+Version 0.5.0 automatically extracts source-code entities and relationships with
+Tree-sitter while indexing `source_code` collections. Supported graph grammars
+are Python, Rust, C, C++, JavaScript/JSX, TypeScript/TSX, Go, Java and C#.
+Normal source-code searches include bounded entity, call and import context;
+set `include_graph_context=false` to omit it. `corpus_graph` answers explicit
+callers, callees, dependency, inheritance and impact queries without adding
+another search mode.
+
+Each source-code collection has a separate `<name>.graph.sqlite` database.
+Extraction makes no LLM calls, runs no source code and downloads no grammars at
+indexing time. Parser-observed syntax is deterministic, but target resolution
+is best-effort static analysis, not compiler verification or a runtime call
+graph. Unresolved and ambiguous relationships remain explicitly labelled.
+General collections and Knowledge Cards do not build graphs.
+
+An ordinary scan fills missing graph data for unchanged sources without new
+embedding calls. A confirmed rebuild also regenerates chunks using AST
+boundaries. Unsupported languages retain line-based/heuristic extraction,
+and source-code collections still never create Markdown sidecars.
+See [source graph setup, coverage and examples](docs/SOURCE_GRAPH.md).
 
 ## Install with uv
 
@@ -215,7 +238,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.4.4) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.0) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

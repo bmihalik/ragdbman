@@ -1,5 +1,18 @@
 # Test coverage map
 
+## Source graphs
+
+`tests/test_source_graph.py` contains 35 parser and integration cases covering
+all bundled grammar variants, imports/aliases, type relations, shadowing,
+mixed-language isolation, bounded traversal, revision-safe citations, outbox
+recovery, graph failure isolation, unchanged backfill, lifecycle operations
+and authenticated MCP/REST. These use actual parsers with synthetic repositories
+and deterministic embedding doubles. See [VERIFICATION.md](VERIFICATION.md) for
+the executed interpreter/profile matrix and [SOURCE_GRAPH.md](SOURCE_GRAPH.md)
+for limits that tests do not turn into compiler/runtime guarantees.
+
+## Coverage map
+
 The test suite covers application behavior using temporary sources and databases.
 This map identifies the main test modules; passing cases do not establish
 compatibility with every real document, external tool version, or deployment.

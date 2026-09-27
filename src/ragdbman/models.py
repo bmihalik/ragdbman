@@ -60,6 +60,7 @@ class SearchFilters(Request):
 
 
 class SearchRequest(Request):
+    include_graph_context: bool | None = None
     collection: str
     query: str
     mode: Literal["vector", "keyword", "hybrid", "structured"] = "hybrid"
@@ -70,6 +71,7 @@ class SearchRequest(Request):
 
 
 class MultiSearchRequest(Request):
+    include_graph_context: bool | None = None
     collections: list[str]
     query: str
     mode: Literal["vector", "keyword", "hybrid", "structured"] = "hybrid"

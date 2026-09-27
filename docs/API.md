@@ -4,13 +4,15 @@ The server hosts the UI, REST/OpenAPI and MCP on the same port. Default addresse
 
 ## MCP tools
 
-The query profile exposes only `corpus_describe` and `corpus_query`. The optional
+The query profile exposes `corpus_describe`, `corpus_query` and `corpus_graph`. The optional
 admin profile adds `corpus_manage`, `corpus_ingest`, and `corpus_job`.
 See [MCP contracts and security](MCP.md) for setup, actions and examples.
 
 The official Python MCP SDK implements stateless Streamable HTTP with JSON responses,
 initialization, schema discovery, and typed calls. Query arguments are flat:
-`query`, `collections`, `mode`, `perspective`, `limit`, `minimum_score`, `filters`.
+`query`, `collections`, `mode`, `perspective`, `limit`, `minimum_score`, `filters`,
+`include_graph_context`. The graph tool takes a `request` object described in
+[SOURCE_GRAPH.md](SOURCE_GRAPH.md).
 Management tools accept a discriminated `request` object with an `action` and
 only the fields valid for that action. The bare `/mcp` path exposes no tools.
 
@@ -23,6 +25,7 @@ Tool errors include the stable application error code in the error text. Returne
 | GET | `/api/health` | Daemon/model/vector status |
 | GET | `/api/corpus` | Compact collection catalog for administrative REST clients |
 | POST | `/api/corpus/query` | Unified query contract and structured response |
+| POST | `/api/corpus/graph` | Bounded read-only source graph traversal; administrator REST authentication |
 | GET / POST | `/api/collections` | List / create |
 | GET / PATCH / DELETE | `/api/collections/{name}` | Inspect / description update / confirmed delete |
 | GET / POST | `/api/collections/{name}/roots` | List / register |
@@ -49,6 +52,12 @@ Tool errors include the stable application error code in the error text. Returne
 Creation accepts `name`, `description`, `source_roots`, `kind`, `embedding_model`, `chunk_size_tokens`, and `chunk_overlap_tokens`. Collection names are limited to letters, digits, underscores and hyphens and must begin with a letter or digit.
 
 Scan bodies accept `root`, `recursive`, and `prune_missing`. File-add bodies accept `path`. Rebuild bodies require `{"confirm":true}`. Delete endpoints use `?confirm=true`, with optional `delete_files=true` for collections or `delete_original_managed_file=true` for sources.
+
+Source-code collection inspection includes `graph.enabled`, stored
+source/entity/relationship counts and `graph.pending_updates`. Counts describe
+stored rows; revision validation may hide stale rows from traversal. Document
+search routes accept `include_graph_context` (null by default); source-code hits
+get read-only context unless false, while other collection kinds are unchanged.
 
 ### Scan job progress
 

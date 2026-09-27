@@ -6,7 +6,9 @@ Future work is guided by the [product vision](docs/VISION.md). Source-code colle
 
 - Extend Knowledge Cards with authoring/curation workflows; structured YAML indexing and retrieval are implemented.
 - Define configurable document-type chunking policies for textbooks, research papers and code.
-- Add AST-aware source boundaries while retaining line-citation fallback.
+- Extend the implemented Tree-sitter graph and AST boundaries to more languages;
+  improve compiler-aware resolution, package/build-system mappings and macro support.
+- Evaluate prose knowledge graphs separately; no LLM-based prose extraction is implemented.
 - Preserve richer tables, equations, footnotes, images and original page anchors through Markdown materialization.
 - Recover MinerU page/region provenance from structured converter output.
 - Add an editing/reindex workflow for manually curated sidecars; current rescan decisions use original-source hashes.

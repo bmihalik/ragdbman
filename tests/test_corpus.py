@@ -44,13 +44,14 @@ def test_wire_profiles_and_no_admin_bypass(cfg, fake, source_dir, secrets):
     engine = Engine(cfg, fake)
     with TestClient(create_app(engine)) as client:
         query_tools = rpc(client, "", method="tools/list").json()["result"]["tools"]
-        assert {t["name"] for t in query_tools} == {"corpus_describe", "corpus_query"}
+        assert {t["name"] for t in query_tools} == {"corpus_describe", "corpus_query", "corpus_graph"}
         admin_tools = rpc(client, "", profile="admin", token=ADMIN, method="tools/list").json()["result"][
             "tools"
         ]
         assert {t["name"] for t in admin_tools} == {
             "corpus_describe",
             "corpus_query",
+            "corpus_graph",
             "corpus_manage",
             "corpus_ingest",
             "corpus_job",

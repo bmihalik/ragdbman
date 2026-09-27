@@ -41,6 +41,15 @@ extra installs. A lockfile entry is not a bundled library or an installed
 dependency. A fresh `uv sync --locked` base environment is tested to contain no
 PyMuPDF installation.
 
+## Source parser dependencies
+
+The base environment installs Tree-sitter and individual language grammar
+packages. ragdbman does not vendor grammar source or replace upstream notices,
+and never downloads grammars while indexing. The locked package versions are
+recorded in `uv.lock`; include their original notices when redistributing an
+environment containing those wheels. This does not change ragdbman's Apache-2.0
+license or the separate PDF backend choices.
+
 ## Distribution checklist
 
 Include LICENSE and NOTICE, preserve first-party copyright notices, and retain

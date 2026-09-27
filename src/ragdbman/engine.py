@@ -75,6 +75,7 @@ class Engine:
         self.shutting_down = False
         self.closed = False
         self._databases = {}
+        self._graphs = {}
         self._database_lock = threading.Lock()
         # PyMuPDF uses process-global native state; do not parse two PDFs in
         # different worker threads at the same time within this engine.
@@ -116,6 +117,121 @@ class Engine:
         database = self._database(collection)
         return await run_executor(database.executor, database.write, function, *args, on_cancel=on_cancel)
 
+    def graph_store(self, name):
+        from .graph.store import GraphStore
+
+        with self._database_lock:
+            if name not in self._graphs:
+                self._graphs[name] = GraphStore(self.db_path(name).with_name(f"{name}.graph.sqlite"))
+            return self._graphs[name]
+
+    def _flush_graph(self, name):
+        if self.registry[name]["kind"] != "source_code" or not self.config.graph.enabled:
+            return
+        try:
+            with self.connection(name) as conn:
+                count = self.graph_store(name).flush(conn)
+            if count:
+                log.debug("Graph updates committed collection=%s sources=%d", name, count)
+        except Exception:
+            log.exception("Graph update deferred collection=%s; durable outbox retained", name)
+
+    def _reset_graph(self, name):
+        store = self._graphs.pop(name, None)
+        if store:
+            store.close()
+        path = self.db_path(name).with_name(f"{name}.graph.sqlite")
+        for suffix in ("", "-wal", "-shm"):
+            Path(str(path) + suffix).unlink(missing_ok=True)
+
+    def _graph_roots(self, meta):
+        return list(meta.get("source_roots", [])) + [
+            meta["managed_root"],
+            *self.config.storage.allowed_source_roots,
+        ]
+
+    def _prepare_graph(self, path, source_id, digest, meta):
+        from .graph.parser import prepare
+
+        try:
+            snapshot, document = prepare(path, source_id, digest, self._graph_roots(meta), self.config.graph)
+            if snapshot["content_hash"] != digest:
+                raise RagError("EXTRACTION_FAILED", "Source changed during graph parsing")
+            log.debug(
+                "Graph parsed source=%s status=%s entities=%d relationships=%d",
+                path.name,
+                snapshot["status"],
+                len(snapshot["entities"]),
+                len(snapshot["relationships"]),
+            )
+            return snapshot, document
+        except RagError:
+            raise
+        except Exception:
+            log.exception("Graph parsing unavailable source=%s; retaining ordinary extraction", path.name)
+            return None, None
+
+    async def _backfill_graph(self, collection, path, source_id, digest, meta, job_id):
+        from .graph.parser import language_for, namespace, parser_version
+
+        root, relative = namespace(path, self._graph_roots(meta))
+        try:
+            current = await run_sync(
+                self.graph_store(collection).is_current,
+                source_id,
+                digest,
+                parser_version(language_for(path)),
+                root,
+                relative,
+            )
+        except Exception:
+            current = False
+        if current:
+            return
+        snapshot, _ = await run_sync(self._prepare_graph, path, source_id, digest, meta)
+        if snapshot is None or await run_sync(sha256_file, path) != digest:
+            return
+        stop = self.cancel_flags[job_id] if job_id else threading.Event()
+        await self._write(
+            collection,
+            self._save_graph_backfill,
+            collection,
+            source_id,
+            digest,
+            snapshot,
+            stop,
+            on_cancel=stop.set,
+        )
+
+    def _save_graph_backfill(self, collection, source_id, digest, snapshot, stop):
+        from .graph.store import queue
+
+        with self.connection(collection) as conn, db.transaction(conn):
+            row = conn.execute(
+                "SELECT status,content_hash_sha256 FROM sources WHERE id=?", (source_id,)
+            ).fetchone()
+            if stop.is_set() or not row or row["status"] != "indexed" or row["content_hash_sha256"] != digest:
+                return
+            queue(conn, source_id, snapshot)
+        self._flush_graph(collection)
+
+    async def graph(self, request):
+        from .graph.query import GraphRequest, traverse
+
+        req = GraphRequest.model_validate(request) if isinstance(request, dict) else request
+        meta = self.get_collection(req.collection)
+        if meta["kind"] != "source_code" or not self.config.graph.enabled:
+            raise RagError("CONFIG_INVALID", "Graph access requires an enabled source-code collection")
+        try:
+            return await run_sync(
+                traverse, partial(self.connection, req.collection), self.graph_store(req.collection), req
+            )
+        except Exception:
+            log.exception("Graph read unavailable collection=%s", req.collection)
+            raise RagError(
+                "CONFIG_INVALID", "Graph unavailable; inspect server diagnostics and rebuild the collection"
+            ) from None
+
     def _save_registry(self):
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write(
@@ -129,6 +245,8 @@ class Engine:
     def repair_registry(self):
         self.registry = {}
         for path in sorted((self.base / "collections").glob("*/*.sqlite")):
+            if path.name != f"{path.parent.name}.sqlite":
+                continue
             try:
                 self._name(path.parent.name)
                 conn = db.connect(path)
@@ -171,6 +289,7 @@ class Engine:
                         "Recovered interrupted jobs collection=%s; keyword counts refreshed; explicit resume required",
                         name,
                     )
+            self._flush_graph(name)
 
     def list_collections(self) -> list[dict]:
         return [self.get_collection(n) for n in sorted(self.registry)]
@@ -180,6 +299,15 @@ class Engine:
             result = db.collection(conn, self.db_path(name))
             if result["kind"] == "knowledge_cards":
                 result["knowledge_cards"] = self.kc_settings.model_dump()
+            if result["kind"] == "source_code":
+                try:
+                    result["graph"] = self.graph_store(name).status()
+                except Exception:
+                    result["graph"] = dict(available=False, status="unavailable")
+                result["graph"]["enabled"] = self.config.graph.enabled
+                result["graph"]["pending_updates"] = conn.execute(
+                    "SELECT count(*) FROM source_graph_outbox"
+                ).fetchone()[0]
             self.registry[name] = result
             return result
 
@@ -236,7 +364,7 @@ class Engine:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = db.connect(path)
         try:
-            db.initialize_schema(conn)
+            db.initialize_schema(conn, req.kind)
             with db.transaction(conn):
                 for folder in ("files", "artifacts", "exports"):
                     (path.parent / folder).mkdir(exist_ok=True)
@@ -322,6 +450,7 @@ class Engine:
         database = self._databases.pop(name, None)
         if database:
             database.close()
+        self._reset_graph(name)
         if delete_files:
             shutil.rmtree(path.parent)
         else:
@@ -448,6 +577,8 @@ class Engine:
         )
         source_id, classification = prepared["source_id"], prepared["classification"]
         if prepared["skipped"]:
+            if classification == "unchanged" and meta["kind"] == "source_code" and self.config.graph.enabled:
+                await self._backfill_graph(collection, path, source_id, digest, meta, job_id)
             log.log(
                 VERBOSE,
                 "Index skipped collection=%s source=%s reason=%s",
@@ -535,6 +666,16 @@ class Engine:
                 )
             if not document.full_text.strip():
                 raise RagError("EXTRACTION_FAILED", "Extraction produced no text")
+            graph_snapshot = None
+            if meta["kind"] == "source_code" and self.config.graph.enabled:
+                graph_snapshot, ast_document = await run_sync(
+                    self._prepare_graph, path, source_id, digest, meta
+                )
+                if ast_document is not None:
+                    ast_document.warnings.extend(document.warnings)
+                    document = ast_document
+                if graph_snapshot:
+                    document.warnings.extend(graph_snapshot["warnings"])
             tokenizer, chunks = await run_sync(self._chunk, document, meta)
             log.debug(
                 "Chunked collection=%s source=%s chunks=%d tokenizer=%s",
@@ -577,6 +718,7 @@ class Engine:
                 embeddings,
                 stop,
                 job_id is None,
+                graph_snapshot,
                 on_cancel=stop.set,
             )
             log.log(
@@ -648,6 +790,8 @@ class Engine:
             existing = dict(existing_row) if existing_row else None
             classification = classify(existing, digest, supported)
             if classification == "unchanged":
+                if root_id:
+                    conn.execute("UPDATE sources SET root_id=? WHERE id=?", (root_id, existing["id"]))
                 return {
                     "source_id": existing["id"],
                     "chunks": 0,
@@ -720,6 +864,7 @@ class Engine:
             conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
             db.refresh_keywords(conn)
             db.audit(conn, "remove_source", self.registry[collection]["id"], source_id)
+        self._flush_graph(collection)
         if to_delete:
             to_delete.unlink(missing_ok=True)
         return {"removed": source_id}
@@ -1132,7 +1277,29 @@ class Engine:
                 skipped_filters=[],
             )
         with self.connection(req.collection) as conn:
-            return await search(conn, meta, req, self.config, self.embedder)
+            response = await search(conn, meta, req, self.config, self.embedder)
+        if (
+            meta["kind"] == "source_code"
+            and self.config.graph.enabled
+            and req.include_graph_context is not False
+        ):
+            from .graph.query import enrich
+
+            try:
+                await run_sync(
+                    enrich,
+                    partial(self.connection, req.collection),
+                    self.graph_store(req.collection),
+                    response["results"],
+                    self.config.graph.search_context_limit,
+                )
+            except Exception:
+                log.exception(
+                    "Graph enrichment unavailable collection=%s; retrieval retained", req.collection
+                )
+                for result in response["results"]:
+                    result["graph_context"] = dict(available=False, status="unavailable")
+        return response
 
     async def search_knowledge_cards(
         self,
@@ -1239,6 +1406,8 @@ class Engine:
             conn.execute("UPDATE sources SET status='queued',content_hash_sha256=NULL")
             conn.execute("DELETE FROM keywords")
             db.audit(conn, "rebuild_collection", meta["id"])
+        if meta["kind"] == "source_code":
+            self._reset_graph(collection)
         job_id = db.uid()
         with self.connection(collection) as conn:
             db.insert(
@@ -1316,6 +1485,8 @@ class Engine:
             await close()
         for database in list(self._databases.values()):
             await asyncio.to_thread(database.close)
+        for store in list(self._graphs.values()):
+            await asyncio.to_thread(store.close)
         self.closed = True
         log.info("Engine shutdown complete; tasks, clients and collection connections closed")
 
@@ -1359,6 +1530,8 @@ class Engine:
             if stop.is_set():
                 raise RagError("JOB_CANCELLED", job_id)
 
+        self._flush_graph(collection)
+
     def _persist_index(
         self,
         collection,
@@ -1375,6 +1548,7 @@ class Engine:
         embeddings,
         stop,
         refresh=True,
+        graph_snapshot=None,
     ):
         # The connection is created, used and closed on this worker thread.
         # The event-loop task keeps the collection lock until this returns.
@@ -1490,7 +1664,12 @@ class Engine:
             conn.execute(
                 "UPDATE collection_meta SET tokenizer_mode=?,updated_at=?", (tokenizer_mode, db.now())
             )
+            if graph_snapshot is not None:
+                from .graph.store import queue
+
+                queue(conn, source_id, graph_snapshot)
             check_cancel()
+        self._flush_graph(collection)
         log.debug(
             "Committed index collection=%s source=%s chunks=%d transaction=%.3fs",
             collection,

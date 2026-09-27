@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingRes
 from . import __version__, corpus, db
 from .engine import Engine
 from .errors import RagError
+from .graph.query import GraphRequest
 from .mcp_server import create_mcp
 from .models import CreateCollection, KnowledgeCardSearchRequest, MultiSearchRequest, Request, SearchRequest
 
@@ -333,6 +334,10 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
     @app.post("/api/search/multi")
     async def multi_search(body: MultiSearchRequest):
         return await engine.search_multi(body)
+
+    @app.post("/api/corpus/graph")
+    async def corpus_graph(body: GraphRequest):
+        return await engine.graph(body)
 
     @app.post("/api/knowledge-cards/search")
     async def knowledge_card_search(body: KnowledgeCardSearchRequest):

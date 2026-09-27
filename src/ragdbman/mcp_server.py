@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
 # SPDX-License-Identifier: Apache-2.0
 
-"""Two read-only corpus tools; three additional tools on the admin profile only."""
+"""Three read-only corpus tools; three additional tools on the admin profile only."""
 
 import json
 from typing import Literal
@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from . import corpus, corpus_admin
 from .engine import Engine
+from .graph.query import GraphRequest
 from .models import SearchFilters
 
 
@@ -65,6 +66,7 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
         limit: int = 5,
         minimum_score: float | None = None,
         filters: SearchFilters | None = None,
+        include_graph_context: bool | None = None,
     ) -> CallToolResult:
         response = await corpus.query(
             engine,
@@ -76,6 +78,7 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
                 limit=limit,
                 minimum_score=minimum_score,
                 filters=filters or SearchFilters(),
+                include_graph_context=include_graph_context,
             ),
             admin=admin,
         )
@@ -83,6 +86,16 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
             content=[TextContent(type="text", text=corpus.render(response))],
             structuredContent=response,
         )
+
+    @server.tool(
+        description="Read the source-code syntax graph. Actions: find, neighbors, callers, callees, "
+        "dependencies, inheritance, impact. Select exact symbol or entity_id; ambiguous matches "
+        "return candidates. Static resolution is best-effort, not a runtime call graph.",
+        annotations=readonly,
+    )
+    async def corpus_graph(request: GraphRequest) -> CallToolResult:
+        corpus.scope(engine, [request.collection], admin=admin)
+        return structured(await engine.graph(request))
 
     if admin:
         mutation = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)

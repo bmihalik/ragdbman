@@ -186,7 +186,7 @@ async def test_mcp_tool_names_and_flat_search_schema(engine):
     mcp = create_app(engine, False).state.mcp
     tools = await mcp.list_tools()
     names = {t.name for t in tools}
-    assert names == {"corpus_describe", "corpus_query"}
+    assert names == {"corpus_describe", "corpus_query", "corpus_graph"}
     schema = next(t.inputSchema for t in tools if t.name == "corpus_query")
     assert "collections" in schema["properties"] and "query" in schema["properties"]
 
@@ -224,7 +224,7 @@ def test_mcp_streamable_http_wire_protocol(cfg, fake, source_dir, monkeypatch):
             headers=headers,
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        assert len(tools.json()["result"]["tools"]) == 5
+        assert len(tools.json()["result"]["tools"]) == 6
         created = client.post(
             "/mcp/admin",
             headers=headers,

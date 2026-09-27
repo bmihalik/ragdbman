@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+- Automatic Tree-sitter syntax graphs and AST-aware chunk boundaries for
+  Python, Rust, C/C++, JavaScript/JSX, TypeScript/TSX, Go, Java and C# source files.
+- Separate per-collection graph SQLite storage with stable source provenance,
+  transactional outbox/replay, revision validation and current chunk citations.
+- Bounded automatic source search enrichment, controlled by
+  `include_graph_context`; ordinary retrieval remains available on graph failure.
+- One read-only `corpus_graph` tool for discovery, neighborhoods, callers/callees,
+  dependencies, type hierarchies and impact traversal. Query/admin profiles now
+  expose three/six tools with unchanged authentication and collection scoping.
+- Administrative `POST /api/corpus/graph`, graph configuration and diagnostics.
+- Missing graph data can be filled by ordinary scans without re-embedding
+  unchanged sources. Confirmed rebuild also refreshes AST chunk boundaries.
+- Explicit unresolved/ambiguous static bindings and bounded parser/traversal
+  behavior; no source execution, graph LLM calls or runtime grammar downloads.
+- Preserve normal text fallback for unsupported/erroring source grammars and
+  keep general/KC indexing separate. Source-code collections never create sidecars.
+- Associate unchanged standalone additions with a later scan root so missing-file
+  pruning can remove their document and graph records.
+- Updated citation metadata, documentation and graph regression tests.
+
 ## 0.4.4
 
 - Add effective TRACE/DEBUG/VERBOSE and richer INFO/WARNING/ERROR diagnostics,

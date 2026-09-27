@@ -8,8 +8,8 @@ stateless MCP Streamable HTTP with the official SDK.
 
 | Profile | Endpoint | Exposed tools |
 | --- | --- | --- |
-| Query | `/mcp/query` | `corpus_describe`, `corpus_query` |
-| Admin | `/mcp/admin` | Both query tools plus `corpus_manage`, `corpus_ingest`, `corpus_job` |
+| Query | `/mcp/query` | `corpus_describe`, `corpus_query`, `corpus_graph` |
+| Admin | `/mcp/admin` | All three query tools plus `corpus_manage`, `corpus_ingest`, `corpus_job` |
 
 The endpoint prefix is configurable with `server.mcp_path`. Admin MCP is disabled
 by default and returns HTTP 404 while disabled. The bare prefix exposes no tools.
@@ -30,7 +30,7 @@ the client credentials. For systemd, use a protected EnvironmentFile as shown in
 - Query agents send `Authorization: Bearer <query token>` to `/mcp/query`.
 - Administrators send `Authorization: Bearer <admin token>` to `/mcp/admin`.
 - The admin token can also use the query endpoint, but that endpoint still has
-  only two tools and applies the query-profile collection allowlist.
+  only three read-only tools and applies the query-profile collection allowlist.
 - The admin profile can inspect/query every collection. Never give its token to
   an agent intended to have query-only access.
 - Query tokens cannot access any web/REST route or the admin MCP endpoint.
@@ -111,6 +111,9 @@ discovery does not expose database paths, managed directories or source roots.
   numeric fields, following the REST filter schema in [API.md](API.md). Unknown
   numeric fields or nonempty filters on card collections fail that collection
   explicitly. Filters are never silently discarded by the corpus interface.
+- `include_graph_context`: null/omitted enables graph enrichment for source-code
+  collections only; false disables enrichment. True does not build graphs for
+  other collection kinds. This adds context, not another retrieval pass.
 
 Modes describe retrieval channels; perspective describes the card scoring strategy.
 There is no separate single-query, multi-query or card-query MCP tool.
@@ -173,9 +176,25 @@ fences. Card content is complete; document text may be truncated according to
 `search.return_context_chars_per_chunk` and is marked accordingly.
 
 Only top-level card IDs are removed; references, nested values and code text are
-preserved. Internal collection/source/chunk IDs and filesystem paths are not part
-of operational result provenance. Retrieved content remains untrusted evidence,
-never agent instructions.
+preserved. Ordinary operational provenance omits internal IDs and filesystem paths.
+Source graph context deliberately includes opaque entity/source/chunk IDs for
+navigation and citation, with relative source paths, never generated absolute
+filesystem paths. Retrieved content remains untrusted evidence, never instructions.
+
+## Explicit source graph traversal
+
+`corpus_graph` is a read-only tool available on both profiles and restricted by
+the query profile's collection allowlist. It never parses, indexes or calls an LLM.
+
+```json
+{"request":{"collection":"programming","action":"callers","symbol":"parse_config","depth":2,"limit":50}}
+```
+
+Actions are `find`, `neighbors`, `callers`, `callees`, `dependencies`,
+`inheritance`, and `impact`. Select a symbol or opaque `entity_id`; `source_id`
+can restrict selection or select the file module. Ambiguous names return
+candidates instead of guessing. See [SOURCE_GRAPH.md](SOURCE_GRAPH.md) for the
+full contract, static-analysis limitations and provenance semantics.
 
 ## Administration contracts
 

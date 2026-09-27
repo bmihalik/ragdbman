@@ -33,9 +33,9 @@ This document describes implemented functionality, not every aspiration in the v
 | DOC/PPT/XLS/RTF | Opt-in LibreOffice conversion | Structure from converted OOXML |
 | Images | Opt-in Tesseract | OCR text |
 | Audio/video | Opt-in ffmpeg and Whisper command | Transcript segments and timestamps |
-| Source code | Heuristic symbol boundaries and line positions | Functions/classes where recognized; paragraph fallback |
+| Source code | Tree-sitter AST boundaries for graph-supported languages; heuristic fallback | Declarations, original line positions, separate syntax graph |
 
-Supported source languages include Rust, Python, JavaScript/TypeScript, Go, Java, Kotlin, C/C++, C#, PHP, Swift, Scala, Objective-C, R, Ruby, shell, SQL, Lua, Perl, Vue and Svelte. Additional extensions are accepted by the same best-effort heuristics; this is not a compiler or tree-sitter parser.
+Text indexing accepts Rust, Python, JavaScript/TypeScript, Go, Java, Kotlin, C/C++, C#, PHP, Swift, Scala, Objective-C, R, Ruby, shell, SQL, Lua, Perl, Vue and Svelte. The graph-supported subset uses Tree-sitter; other formats retain heuristic/line fallback. This is not a compiler. See [graph coverage](docs/SOURCE_GRAPH.md).
 
 Source-code collections also sniff unrecognized names/suffixes, including
 `Kconfig`, `LICENSE` and `sdkconfig.defaults`. A 64 KiB probe admits nonempty
@@ -140,7 +140,7 @@ Numeric facts are only extracted from explicit supported labels. Unrelated numbe
 
 ## Service interfaces
 
-The service provides two operational MCP tools (`corpus_describe`, `corpus_query`)
+The service provides three operational MCP tools (`corpus_describe`, `corpus_query`, `corpus_graph`)
 and three additional tools on the separately authorized admin profile
 (`corpus_manage`, `corpus_ingest`, `corpus_job`). The admin profile can be disabled
 without disabling web administration. Distinct tokens and middleware enforce the
@@ -153,8 +153,8 @@ The service provides password/token authentication and a shared-secret boundary 
 
 ## Known limitations
 
-- No Knowledge Cards/KCDB, custom document-type chunking policy language, or automatic source summarization yet.
-- Function/class extraction is heuristic, not AST-accurate. Layout/reading-order quality depends on the chosen extractor.
+- Knowledge Cards are implemented; no custom document-type policy language or automatic source summarization yet.
+- Source graph resolution is best-effort static analysis, not runtime or compiler verification; unsupported languages retain heuristics. Layout/reading-order quality depends on the chosen extractor.
 - The Markdown renderer is deliberately simple; complex table, equation, footnote and image layouts are not losslessly reconstructed.
 - DRM-protected and unusual fixed-layout Kindle files are not guaranteed; real non-empty PDF passwords are unsupported.
 - OCR/converter/transcription adapters are contract-tested with fake executables. Their real models, GPU environments and version-specific output variations require deployment smoke tests.

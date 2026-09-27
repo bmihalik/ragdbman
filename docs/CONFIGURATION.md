@@ -167,6 +167,14 @@ also disabled. See [PDF_BACKENDS.md](PDF_BACKENDS.md) for complete examples.
 command. Input/output paths and `--pages` are owned by ragdbman and cannot be
 overridden there. Use only flags supported by your installed version.
 
+## Source graph configuration
+
+The `[graph]` table enables source-code graphs by default and controls file size,
+parser timeout, entity/relationship/node budgets and search-context size.
+General and Knowledge Cards collections are unaffected. All keys, defaults,
+supported grammars and static-analysis limits are documented in
+[SOURCE_GRAPH.md](SOURCE_GRAPH.md#setup-and-scope).
+
 ## Logging
 
 `[logging] level` accepts `critical`, `error`, `warning`/`warn`, `info`, `verbose`,
