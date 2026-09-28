@@ -6,6 +6,28 @@ quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
 ## Version 0.5.2
 
+### Web UI follow-up
+
+The raw/LLM and graph UI update was checked on 28 September 2026 with CPython
+3.12.13: **520 passed, 2 optional tests skipped** in the base profile, and
+**522 passed** with the PyMuPDF extra. Two new route tests check graph-page
+administrative authentication.
+
+The Chromium `browser_search_graph.mjs` regression passes, covering query/card
+format mappings, graph context, graph actions/options, exact entity selection,
+empty/disabled/error states, escaped hostile evidence, clipboard-denial fallback
+and mobile width. The existing `browser_job_record.mjs` regression also passes,
+including actual mouse selection, stable DOM identity, expansion and focus.
+
+Separate live-backend checks used an isolated synthetic repository and the real
+Engine/SQLite/Tree-sitter pipeline with deterministic embedding fixtures.
+Callers included local and imported functions with current source-line evidence.
+Desktop and 375-pixel mobile layouts, light/dark themes and readable output were
+inspected without page errors or horizontal overflow. These are development
+checks, not real-user collection or embedding-quality acceptance.
+
+### CLI release checks
+
 CLI implementation and source packaging were checked on Linux on
 28 September 2026:
 

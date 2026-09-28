@@ -24,8 +24,9 @@ There is no new `corpus_search` alias. The unified search tool remains
 `corpus_query`; query/admin profiles still expose three/six tools. Discovery
 and management tool formats are unchanged. The legacy specialized Knowledge
 Cards REST route retains its existing JSON/YAML envelope; use the unified
-corpus route to select a presentation for cards. The web UI omits `format`
-and therefore continues receiving its existing JSON.
+corpus route to select a presentation for cards. The web UI defaults to raw
+output and now offers a Raw JSON/LLM text selector, graph-context controls,
+and graph traversal. See [WEB_UI.md](WEB_UI.md) for the card endpoint mappings.
 
 ## Raw mode
 

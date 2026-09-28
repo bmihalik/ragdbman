@@ -163,6 +163,12 @@ The admin UI retains collection creation, model/chunk overrides, roots/scans,
 uploads, source inspection, jobs/SSE, search, manifests, vacuum, rebuild and
 confirmed deletion. Specialized REST routes remain available to administrators.
 
+Search now exposes raw/LLM output and source graph-context options. A read-only
+graph explorer supports candidate discovery, exact-ID follow-up, callers/callees,
+dependencies, inheritance, impact and configurable traversal limits. Raw views
+include entity/relationship inspection and complete JSON; LLM views preserve the
+server's text with copy/select controls. See [WEB_UI.md](docs/WEB_UI.md).
+
 The service provides password/token authentication and a shared-secret boundary for an OAuth reverse proxy. OAuth itself remains the reverse proxy's responsibility. Host/origin checks and source-root checks apply to REST and MCP.
 
 ## Known limitations

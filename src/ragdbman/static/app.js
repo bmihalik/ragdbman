@@ -13,8 +13,9 @@ async function api(url, method="GET", body) {
   if(body instanceof FormData) opts.body = body;
   else if(body !== undefined) {opts.headers={"Content-Type":"application/json"};opts.body=JSON.stringify(body);}
   const response = await fetch(url,opts);
-  const data = await response.json();
-  if(!response.ok) throw new Error(data.message || JSON.stringify(data.detail || data));
+  const type = response.headers.get("content-type") || "";
+  const data = type.includes("json") ? await response.json() : await response.text();
+  if(!response.ok) throw new Error(typeof data === "string" ? data || `HTTP ${response.status}` : data.message || JSON.stringify(data.detail || data));
   return data;
 }
 function error(node, err) {node.innerHTML=`<p class="error" role="alert">${esc(err.message)}</p>`;}
@@ -25,8 +26,9 @@ async function confirmAction(message) {
   return new Promise(resolve => d.addEventListener("close",()=>resolve(d.returnValue==="yes"),{once:true}));
 }
 function bindForm(id, fn) {
-  $(id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector("button[type=submit]") || e.target.querySelector("button");button.disabled=true;
-    try{await fn(new FormData(e.target));}catch(err){error($("#feedback"),err);}finally{button.disabled=false;}};
+  $(id).onsubmit=async e=>{e.preventDefault();if(e.target.dataset.busy==="true"||e.target.dataset.disabled==="true")return;const button=e.target.querySelector("button[type=submit]") || e.target.querySelector("button");button.disabled=true;e.target.dataset.busy="true";
+    $("#feedback").textContent="";
+    try{await fn(new FormData(e.target));}catch(err){error($("#feedback"),err);}finally{delete e.target.dataset.busy;button.disabled=e.target.dataset.disabled==="true";}};
 }
 async function dashboard() {
   const collections=await api("/api/collections");
@@ -56,7 +58,7 @@ async function collectionsPage() {
 async function detail(name) {
   const base="/api/collections/"+encodeURIComponent(name), c=await api(base), roots=await api(base+"/roots"), jobs=await api(base+"/jobs");
   main.innerHTML=heading(name,c.description || "Collection overview and indexing controls.")+
-  `<div class="toolbar"><a class="btn" href="/collections/${encodeURIComponent(name)}/search">Search</a><a class="btn secondary" href="/collections/${encodeURIComponent(name)}/sources">Sources</a><a class="btn secondary" href="/collections/${encodeURIComponent(name)}/upload">Upload</a><a class="btn secondary" href="${base}/manifest">Manifest</a></div>
+  `<div class="toolbar"><a class="btn" href="/collections/${encodeURIComponent(name)}/search">Search</a>${c.kind==="source_code"?`<a class="btn secondary" href="/collections/${encodeURIComponent(name)}/graph">Graph explorer</a>`:""}<a class="btn secondary" href="/collections/${encodeURIComponent(name)}/sources">Sources</a><a class="btn secondary" href="/collections/${encodeURIComponent(name)}/upload">Upload</a><a class="btn secondary" href="${base}/manifest">Manifest</a></div>
   <section><h2>Configuration</h2><p><b>${esc(c.kind)}</b> · ${c.counts.sources} sources · ${c.kind==="knowledge_cards"?`${c.counts.cards} cards`:`${c.counts.chunks} chunks`}</p><code>${esc(c.embedding.model)} · ${c.embedding.dimensions} dimensions · ${c.kind==="knowledge_cards"?"Whole-field embeddings, no sidecars":`${c.chunking.size_tokens}/${c.chunking.overlap_tokens} tokens · ${esc(c.chunking.tokenizer_mode)}`}</code>
   <details><summary>Inspect full configuration</summary>${json(c)}</details></section>
   <section><h2>Source roots</h2><div id="roots">${roots.length?table(["Path","Action"],roots.map(r=>`<tr><td><code>${esc(r.path)}</code></td><td><button class="secondary scan-root" data-root="${esc(r.path)}">Scan</button> <button class="danger remove-root" data-id="${esc(r.id)}">Unregister</button></td></tr>`)):"<p>No registered directories yet. Add a root or upload a document.</p>"}</div>
@@ -122,23 +124,136 @@ async function jobPage(name,id) {
   $("#cancel").onclick=async()=>{try{await api("/api/jobs/"+id+"/cancel","POST");}catch(e){error($("#feedback"),e);}};
   $("#resume").onclick=async()=>{try{await api(base+"/resume","POST");location.reload();}catch(e){error($("#feedback"),e);}};
 }
+function formatControl(defaultValue="raw") {
+  return `<label>Output format<select name="format" data-testid="select-output-format"><option value="raw" ${defaultValue==="raw"?"selected":""}>Raw JSON</option><option value="llm" ${defaultValue==="llm"?"selected":""}>LLM text</option></select></label>`;
+}
+function outputPanel(data, format, title) {
+  const text=typeof data==="string"?data:JSON.stringify(data,null,2);
+  return `<section class="response-panel" data-testid="response-panel"><div class="response-heading"><h2>${esc(title)}</h2><button type="button" class="secondary" data-testid="copy-response" id="copy-response">Copy ${format==="llm"?"text":"JSON"}</button></div><p class="muted" id="copy-status" role="status">Static response snapshot. Select or copy without automatic refresh.</p><pre id="response-text" data-testid="response-text" tabindex="0" aria-label="${format==="llm"?"LLM-ready response":"Raw JSON response"}">${esc(text)}</pre></section>`;
+}
+function bindOutput() {
+  const button=$("#copy-response");if(!button)return;
+  button.onclick=async()=>{
+    const node=$("#response-text");
+    try{await navigator.clipboard.writeText(node.textContent);$("#copy-status").textContent="Response copied.";}
+    catch{const range=document.createRange();range.selectNodeContents(node);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);node.focus();$("#copy-status").textContent="Clipboard access is unavailable. Response selected; use your system Copy command.";}
+  };
+}
 async function searchPage(name) {
   const cols=await api("/api/collections");
   const current=name&&cols.find(c=>c.name===name), isKC=current?.kind==="knowledge_cards";
+  if(name&&!current)throw new Error("Collection not found.");
   main.innerHTML=heading(name?name+" / Search":"Search across collections","Inspect rank, evidence, citations, and applied filters.")+
+    (name?`<div class="toolbar"><a href="/collections/${encodeURIComponent(name)}">Back to collection</a>${current.kind==="source_code"?`<a href="/collections/${encodeURIComponent(name)}/graph">Graph explorer</a>`:""}</div>`:"")+
     `<section><form id="search">${name?"":`<fieldset><legend>Collections</legend>${cols.map(c=>`<label class="check"><input type="checkbox" name="collection" value="${esc(c.name)}" checked>${esc(c.name)}</label>`).join("")}</fieldset>`}
-    <label>Query<input name="query" ${isKC?"required":""} placeholder="What are you looking for?"></label><div class="row"><label>Retrieval mode<select name="mode"><option>hybrid</option><option>keyword</option><option>vector</option>${isKC?"":"<option>structured</option>"}</select></label><label>Maximum results<input name="top_k" type="number" value="${isKC?current.knowledge_cards.default_top_k:8}" min="1" max="50" required></label></div>
+    <label>Query<input name="query" data-testid="input-query" ${isKC?"required":""} placeholder="What are you looking for?"></label><div class="row"><label>Retrieval mode<select name="mode"><option>hybrid</option><option>keyword</option><option>vector</option>${isKC?"":"<option>structured</option>"}</select></label><label>Maximum results<input name="top_k" type="number" value="${isKC?current.knowledge_cards.default_top_k:8}" min="1" max="50" required></label>${formatControl()}</div>
+    ${!name||current.kind==="source_code"?`<label>Graph context<select name="graph_context" data-testid="select-graph-context"><option value="auto">Automatic for source code</option><option value="true">Include source graph context</option><option value="false">Omit graph context</option></select></label>`:""}
+    <p class="muted">Raw keeps structured metadata; LLM text is formatted by the server. Output formatting does not change ranking or generate summaries.</p>
     ${isKC?`<div class="row"><label>Query type<select name="query_type"><option>expert</option><option>general</option></select></label><label>Minimum confidence-weighted similarity<input name="minimum_similarity" type="number" value="${current.knowledge_cards.min_similarity}" min="0" max="1" step="0.01" required></label></div>`:`<details><summary>Structured filters</summary><label>Filters as JSON<textarea name="filters" placeholder='{"numeric":[{"field":"price","op":"less_than","value":100}]}'>{}</textarea></label></details>`}
-    <button type="submit">Search</button></form></section><div id="results" aria-live="polite"></div>`;
-  bindForm("#search",async f=>{const request={query:f.get("query"),mode:f.get("mode"),top_k:Number(f.get("top_k"))};
+    <button type="submit" data-testid="button-search" ${!name&&!cols.length?"disabled":""}>Search</button></form></section><div id="results" aria-live="polite"></div>`;
+  bindForm("#search",async f=>{const format=f.get("format"),request={query:f.get("query"),mode:f.get("mode"),top_k:Number(f.get("top_k"))};
     if(isKC){request.collection=name;request.query_type=f.get("query_type");request.minimum_similarity=Number(f.get("minimum_similarity"));}
     else request.filters=JSON.parse(f.get("filters"));
     if(name)request.collection=name;else request.collections=f.getAll("collection");
-    $("#results").innerHTML="<p>Searching…</p>";const data=await api(isKC?"/api/knowledge-cards/search":name?"/api/search":"/api/search/multi","POST",request);
-    $("#results").innerHTML=`<p>${data.results.length} matching ${isKC?"cards":"results"}</p>`+(isKC&&!data.results.length?`<p>${esc(data.yaml)}</p>`:"")+data.results.map(r=>isKC?`<article class="card"><h2>${esc(r.card.title)}</h2><p class="muted">Score ${r.score.toFixed(6)} · confidence ${r.card.confidence}</p><pre>${esc(r.yaml)}</pre><details><summary>Provenance and scores</summary>${json({...r,card:undefined,yaml:undefined})}</details></article>`:`<article class="card"><h2>${esc(r.citation_label)}</h2><p class="muted">Score ${r.score.toFixed(6)} · Vector ${r.vector_score??"—"} · Keyword ${r.keyword_score??"—"}</p><pre>${esc(r.text||"")}</pre><details><summary>Provenance and metadata</summary>${json(r)}</details></article>`).join("")+
-      (isKC?"":`<details><summary>Filter and collection diagnostics</summary>${json({...data,results:undefined})}</details>`);});
+    if(!name&&!request.collections.length)throw new Error("Select at least one collection.");
+    const node=$("#results");node.setAttribute("aria-busy","true");node.innerHTML="<p role='status'>Searching…</p>";
+    try{
+    let endpoint=isKC?"/api/knowledge-cards/search":name?"/api/search":"/api/search/multi",body=request;
+    if(isKC&&format==="llm"){
+      endpoint="/api/corpus/query";body={query:request.query,collections:[name],mode:request.mode==="vector"?"semantic":request.mode,
+        perspective:request.query_type,minimum_score:request.minimum_similarity,limit:request.top_k,format};
+    }else if(!isKC){request.format=format;const graph=f.get("graph_context");request.include_graph_context=graph==="auto"||graph===null?null:graph==="true";}
+    const data=await api(endpoint,"POST",body);
+    if(format==="llm"){if(typeof data!=="string")throw new Error("Expected a text response from the server.");node.innerHTML=outputPanel(data,format,"LLM-ready query response");bindOutput();return;}
+    node.innerHTML=`<p>${data.results.length} matching ${isKC?"cards":"results"} · Collections: ${esc(name||request.collections.join(", "))}</p>`+(isKC&&!data.results.length?`<p>${esc(data.yaml)}</p>`:"")+data.results.map(r=>isKC?`<article class="card"><h2>${esc(r.card.title)}</h2><p class="muted">Score ${r.score.toFixed(6)} · confidence ${r.card.confidence}</p><pre>${esc(r.yaml)}</pre><details><summary>Provenance and scores</summary>${json({...r,card:undefined,yaml:undefined})}</details></article>`:`<article class="card"><h2>${esc(r.citation_label)}</h2><p class="muted">Score ${r.score.toFixed(6)} · Vector ${r.vector_score??"—"} · Keyword ${r.keyword_score??"—"}</p><pre>${esc(r.text||"")}</pre><details><summary>Provenance and metadata</summary>${json(r)}</details></article>`).join("")+
+      (isKC?"":`<details><summary>Filter and collection diagnostics</summary>${json({...data,results:undefined})}</details>`)+
+      `<details><summary>Full raw response</summary>${outputPanel(data,format,"Raw query response")}</details>`;
+    bindOutput();
+    if(!isKC)node.querySelectorAll("article").forEach((article,index)=>{
+      const result=data.results[index],collection=cols.find(c=>c.id===result.collection_id);
+      if(collection?.kind==="source_code"&&result.source_id){
+        const link=document.createElement("a");link.textContent="Explore source graph";
+        link.href=`/collections/${encodeURIComponent(collection.name)}/graph?source_id=${encodeURIComponent(result.source_id)}&action=find`;
+        article.append(link);
+      }
+    });
+    }catch(err){error(node,err);}finally{node.removeAttribute("aria-busy");}
+  });
+}
+async function graphPage(name) {
+  const all=await api("/api/collections"),cols=all.filter(c=>c.kind==="source_code");
+  const requested=name&&all.find(c=>c.name===name);
+  main.innerHTML=heading(name?name+" / Graph explorer":"Source graph explorer",
+    "Find entities, inspect calls and dependencies, and follow source-backed relationship chains.");
+  if(name&&!requested)throw new Error("Collection not found.");
+  if(name&&requested.kind!=="source_code"){main.innerHTML+=`<section><h2>Source-code collections only</h2><p>General documents and Knowledge Cards do not build source graphs.</p><a href="/graph">Choose a source-code collection</a></section>`;return;}
+  if(!cols.length){main.innerHTML+=`<section><h2>No source-code collections yet</h2><p>Create a source-code collection and scan its files to build a graph.</p><a class="btn" href="/collections">Manage collections</a></section>`;return;}
+  const selected=name||cols[0].name,params=new URLSearchParams(location.search);
+  main.innerHTML+=`<div class="toolbar"><a id="graph-back" href="/collections/${encodeURIComponent(selected)}">Back to collection</a></div>
+    <section><form id="graph-form">
+    <div class="row"><label>Source-code collection<select name="collection" data-testid="select-graph-collection">${cols.map(c=>`<option value="${esc(c.name)}" ${c.name===selected?"selected":""}>${esc(c.name)}</option>`).join("")}</select></label>
+    <label>Graph action<select name="action" data-testid="select-graph-action">${["find","neighbors","callers","callees","dependencies","inheritance","impact"].map(a=>`<option value="${a}">${a}</option>`).join("")}</select></label>${formatControl()}</div>
+    <p class="muted" id="graph-summary" role="status"></p>
+    <div class="row"><label>Identify by<select name="selector_type" data-testid="select-graph-selector"><option value="symbol">Symbol</option><option value="entity_id">Entity ID</option></select></label>
+    <label class="grow">Symbol or entity ID<input name="selector_value" data-testid="input-graph-selector" placeholder="Optional for find; e.g. parse_config"></label></div>
+    <button type="submit" data-testid="button-graph-query">Query graph</button>
+    <details id="graph-options"><summary>Traversal options</summary>
+    <div class="row"><label>Depth<input name="depth" type="number" min="1" max="5" value="1" required></label><label>Result limit<input name="limit" type="number" min="1" max="200" value="50" required></label>
+    <label>Direction<select name="direction"><option value="outgoing">Outgoing</option><option value="incoming">Incoming</option><option value="both">Both</option></select></label></div>
+    <label>Restrict to source ID<input name="source_id" data-testid="input-graph-source" placeholder="Optional stable source ID"></label>
+    <fieldset><legend>Relationship override</legend><p class="muted">Leave unchecked to use the action defaults.</p><div class="check-grid">${["contains","imports","calls","inherits","implements","type_base","references","depends_on"].map(k=>`<label class="check"><input type="checkbox" name="relationship" value="${k}">${k}</label>`).join("")}</div></fieldset></details>
+    <p class="muted" id="graph-action-help">Find matches by name, or leave the selector empty to list entities.</p>
+    <p class="notice">Read-only, best-effort static analysis. Unresolved or omitted edges are not proof of runtime behavior. Queries never build or rescan graphs.</p>
+    </form></section><div id="graph-results" aria-live="polite"></div>`;
+  const form=$("#graph-form"),field=n=>form.elements.namedItem(n);
+  const actions={find:"Find matches by name, or leave the selector empty to list entities.",neighbors:"Inspect incoming, outgoing or both directions for one entity.",
+    callers:"Follow incoming call relationships.",callees:"Follow outgoing call relationships.",dependencies:"Follow outgoing file/module dependencies.",
+    inheritance:"Follow outgoing base-type and implementation relationships.",impact:"Follow incoming static calls, references, type and dependency relationships."};
+  function update(){
+    const c=cols.find(c=>c.name===field("collection").value),g=c.graph||{};
+    field("direction").disabled=field("action").value!=="neighbors";
+    field("selector_value").required=field("action").value!=="find"&&!field("source_id").value.trim();
+    field("selector_value").placeholder=field("selector_type").value==="entity_id"?"Paste an entity ID":"Optional for find; e.g. parse_config";
+    if(name){$("h1").textContent=c.name+" / Graph explorer";document.title=c.name+" / Graph explorer · ragdbman";}
+    $("#graph-action-help").textContent=actions[field("action").value];
+    $("#graph-summary").textContent=g.enabled===false?"Graphs are disabled. Enable graph.enabled in daemon configuration and restart.":
+      !g.available?"No graph database yet. Run a normal scan from the collection page; queries do not index files.":
+      `${g.entities??0} stored entities · ${g.relationships??0} relationships · ${g.pending_updates??0} pending updates. Read validation may hide stale revisions.`;
+    form.dataset.disabled=String(g.enabled===false);form.querySelector("button[type=submit]").disabled=g.enabled===false||form.dataset.busy==="true";
+    $("#graph-back").href="/collections/"+encodeURIComponent(c.name);
+  }
+  for(const n of ["collection","action","selector_type","source_id"])field(n).addEventListener(n==="source_id"?"input":"change",update);
+  if(Object.hasOwn(actions,params.get("action")))field("action").value=params.get("action");
+  if(params.get("source_id")){field("source_id").value=params.get("source_id");$("#graph-options").open=true;}
+  update();
+  bindForm("#graph-form",async f=>{
+    const request={collection:f.get("collection"),action:f.get("action"),format:f.get("format"),depth:Number(f.get("depth")),limit:Number(f.get("limit"))};
+    const selector=f.get("selector_value").trim(),source=f.get("source_id").trim(),relationships=f.getAll("relationship");
+    if(selector)request[f.get("selector_type")]=selector;if(source)request.source_id=source;
+    if(request.action!=="find"&&!selector&&!source)throw new Error("Choose a symbol, entity ID or source ID.");
+    if(request.action==="neighbors")request.direction=f.get("direction");
+    if(relationships.length)request.relationships=relationships;
+    const node=$("#graph-results");node.setAttribute("aria-busy","true");node.innerHTML="<p role='status'>Reading graph…</p>";
+    try{
+      const data=await api("/api/corpus/graph","POST",request);
+      if(typeof data==="string"){node.innerHTML=outputPanel(data,"llm","LLM-ready graph response");bindOutput();return;}
+      const candidates=data.status==="ambiguous"||request.action==="find"?data.candidates:data.entities;
+      const entities=new Map((data.entities||[]).map(e=>[e.entity_id,e]));
+      node.innerHTML=`<section><h2>Graph result: ${esc(data.status)}</h2><p>Collection: <code>${esc(request.collection)}</code> · Action: <code>${esc(request.action)}</code></p><p>${esc(data.message||(candidates?.length?"Select an entity below for a precise follow-up query.":"No entities or relationships matched. Try a different selector, or scan the collection."))}</p><p class="muted">${esc(data.limitation)}</p>${data.truncated?'<p class="notice">Results are partial/truncated. Narrow the selector or adjust the limits.</p>':""}</section>`+
+        (data.status==="ok"&&request.action!=="find"&&!data.relationships?.length?'<p class="notice">No matching relationships were returned. This does not prove that no runtime relationships exist.</p>':"")+
+        (candidates?.length?`<section><h2>${data.status==="ambiguous"?"Choose an exact match":"Entities"}</h2><div class="entity-list">${candidates.map(e=>`<article class="entity"><h3>${esc(e.qualified_name||e.name)}</h3><p>${esc(e.kind)} · ${esc(e.provenance?.source_path)} · lines ${esc(e.provenance?.line_start)}-${esc(e.provenance?.line_end)}</p><button type="button" class="secondary use-entity" data-testid="button-use-entity" data-id="${esc(e.entity_id)}">Use this entity</button></article>`).join("")}</div></section>`:"")+
+        (data.relationships?.length?`<section><h2>Relationships</h2>${table(["From","Relationship","To","Resolution","Evidence"],data.relationships.map(e=>`<tr><td>${esc(e.from_name||entities.get(e.from_entity_id)?.name||"<module>")}</td><td>${esc(e.kind)}</td><td>${esc(e.resolved_target_name||e.target_name)}</td><td>${esc(e.resolution)}</td><td>${esc(e.provenance?.source_path)}:${esc(e.provenance?.line_start)}</td></tr>`))}</section>`:"")+
+        `<details><summary>Full raw graph response and chains</summary>${outputPanel(data,"raw","Raw graph response")}</details>`;
+      node.querySelectorAll(".use-entity").forEach(button=>button.onclick=()=>{
+        field("collection").value=request.collection;field("selector_type").value="entity_id";field("selector_value").value=button.dataset.id;
+        field("source_id").value="";field("action").value="neighbors";update();field("selector_value").focus();form.scrollIntoView({block:"start"});
+        $("#feedback").textContent="Entity selected. Choose a graph action, then query again.";
+      });
+      bindOutput();
+    }catch(err){error(node,err);}finally{node.removeAttribute("aria-busy");}
+  });
 }
 (async()=>{try{const parts=location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if(parts[0]==="collections"&&parts[1]){const [_,name,page,id]=parts;if(page==="sources")await sourcesPage(name);else if(page==="upload")await uploadPage(name);else if(page==="jobs")await jobPage(name,id);else if(page==="search")await searchPage(name);else await detail(name);}
-  else if(parts[0]==="collections")await collectionsPage();else if(parts[0]==="search-multi")await searchPage();else await dashboard();
+  if(parts[0]==="collections"&&parts[1]){const [_,name,page,id]=parts;if(page==="sources")await sourcesPage(name);else if(page==="upload")await uploadPage(name);else if(page==="jobs")await jobPage(name,id);else if(page==="search")await searchPage(name);else if(page==="graph")await graphPage(name);else await detail(name);}
+  else if(parts[0]==="collections")await collectionsPage();else if(parts[0]==="search-multi")await searchPage();else if(parts[0]==="graph")await graphPage();else await dashboard();
 }catch(e){main.innerHTML=heading("Unable to load this view","Check that the daemon is running and the collection still exists.");error($("#feedback"),e);}})();

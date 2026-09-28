@@ -13,6 +13,11 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 ## Coverage map
 
+`test_web_graph_ui.py` checks administrative authentication on the new graph
+pages. Optional `browser_search_graph.mjs` covers formats, graph controls,
+selection, error/disabled/empty states, escaping, copying and mobile width;
+`browser_job_record.mjs` retains the stable-inspector regression.
+
 `tests/test_cli_commands.py` adds 59 CLI contract and workflow cases, including
 actual foreground and daemon subprocesses, cancellation/resume, ownership
 contention, watch output, confirmations, filters, table escaping and manifests.

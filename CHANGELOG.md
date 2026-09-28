@@ -2,6 +2,10 @@
 
 ## 0.5.2
 
+- Web UI follow-up: expose raw/LLM search formats, graph-context controls,
+  exact-entity graph navigation and all read-only graph actions; support
+  JSON/text responses with safe static copy/select panels and mobile layouts.
+
 - Extend the CLI with all 25 requested engine-service commands, retaining
   serve/init/registry-repair/fetch-tokenizer, plus graph and Knowledge Card search.
 - Add global config/log flags, validated named arguments, repeated numeric

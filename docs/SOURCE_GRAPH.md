@@ -136,6 +136,10 @@ preserving ordinary hits. No read triggers parsing, outbox replay or embedding.
 
 ## Traversal contract
 
+The web **Graphs** view and source-code collection **Graph explorer** expose
+this contract with raw/LLM output, entity selection and traversal controls.
+See [WEB_UI.md](WEB_UI.md); browser access retains administrative authentication.
+
 MCP tool: `corpus_graph`, with one `request` object.
 Administrative REST: `POST /api/corpus/graph`, with that object as the JSON body.
 REST retains administrator authentication; a query-only token cannot bypass it.

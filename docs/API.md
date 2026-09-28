@@ -24,6 +24,11 @@ accept `format="raw"|"llm"` in the body, defaulting to raw JSON. Explicit LLM
 mode returns UTF-8 `text/plain`, not a JSON string; default UI behavior is
 unchanged. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md) for examples and scope.
 
+The web UI offers these format choices directly and serves graph views at
+`/graph` and `/collections/{name}/graph`, protected by the existing
+administrative authentication. Graph traversal still uses `POST /api/corpus/graph`;
+no additional mutation API or MCP tool is introduced.
+
 ## REST routes
 
 | Method | Route | Operation |

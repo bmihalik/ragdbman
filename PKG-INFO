@@ -73,6 +73,12 @@ boundaries. Unsupported languages retain line-based/heuristic extraction,
 and source-code collections still never create Markdown sidecars.
 See [source graph setup, coverage and examples](docs/SOURCE_GRAPH.md).
 
+The web Search pages expose **Raw JSON** and **LLM text** output plus source
+graph-context controls. Open **Graphs** in the navigation, **Graph explorer**
+on a source-code collection, or **Explore source graph** on a raw search hit
+to inspect entities, callers, dependencies and type relationships.
+See [web query and graph guide](docs/WEB_UI.md) for the read-only explorer.
+
 ## Install with uv
 
 Use Python 3.11 or newer. Python 3.12 is recommended for the widest compatibility with optional converter installations.

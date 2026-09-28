@@ -391,6 +391,8 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
         "/collections/{name}/sources",
         "/collections/{name}/jobs/{job_id}",
         "/collections/{name}/search",
+        "/collections/{name}/graph",
+        "/graph",
         "/search-multi",
     ):
         app.add_api_route(path, ui, methods=["GET"], include_in_schema=False)
