@@ -4,6 +4,9 @@
 """Stable error codes shared by CLI, REST, and MCP."""
 
 STATUS = {
+    "DATA_DIRECTORY_BUSY": 409,
+    "DAEMON_UNAVAILABLE": 503,
+    "REMOTE_ERROR": 502,
     "SERVER_SHUTTING_DOWN": 503,
     "CONFIG_INVALID": 400,
     "COLLECTION_NOT_FOUND": 404,

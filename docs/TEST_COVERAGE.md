@@ -13,6 +13,11 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 ## Coverage map
 
+`tests/test_cli_commands.py` adds 59 CLI contract and workflow cases, including
+actual foreground and daemon subprocesses, cancellation/resume, ownership
+contention, watch output, confirmations, filters, table escaping and manifests.
+See [CLI.md](CLI.md) for supported execution modes and limits.
+
 `tests/test_output_formats.py` adds 28 format-contract cases. They check
 service-side raw/LLM presentation, MCP/REST defaults, no duplicate JSON in
 text mode, authorization, graph uncertainty/citations, card YAML, escaping,

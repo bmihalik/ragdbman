@@ -99,6 +99,14 @@ not OFF and does not eliminate all synchronization/checkpoint I/O.
 
 ## Ctrl+C and termination
 
+Direct CLI scan/rebuild/resume now run in the foreground rather than detaching
+in-process tasks. CLI/serve ownership locks prevent a second direct command
+from recovering a live owner's jobs. Use `--server-url` for independent
+inspection/watch/cancel commands while a daemon runs; remote client interruption
+does not cancel an already accepted server job. Foreground CLI signal cleanup
+uses the same shutdown timeout and converter termination policy.
+See [CLI.md](CLI.md).
+
 ```toml
 [server]
 shutdown_grace_seconds = 5

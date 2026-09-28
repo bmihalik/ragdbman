@@ -140,6 +140,14 @@ Numeric facts are only extracted from explicit supported labels. Unrelated numbe
 
 ## Service interfaces
 
+The CLI exposes 31 explicit commands: four infrastructure commands, the 25
+specified engine-service commands, and graph/card search. It supports validated
+flags, repeated numeric filters, JSON/table output, readable search output,
+manifest export, and two-second job watching. Direct jobs retain their engine
+until stopped; optional daemon transport uses existing administrative REST.
+CLI/serve acquire storage/registry ownership locks before startup recovery.
+See [CLI.md](docs/CLI.md) and [PYTHON_API_GUIDE.md](docs/PYTHON_API_GUIDE.md).
+
 Query/graph output has `raw` and `llm` presentations. MCP defaults to readable
 text without duplicated metadata; REST/Python default to existing JSON.
 The renderer flattens graph context, preserves provenance locations and

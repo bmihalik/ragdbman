@@ -27,7 +27,7 @@ The Python service is organized around a shared `Engine`. Transport code validat
 | Blocking-work isolation and cancellation cleanup | `workers.py` |
 | MCP interface | `mcp_server.py` |
 | REST and administrative UI | `web.py`, `static/` |
-| Command-line interface | `cli.py`, `__main__.py` |
+| Command-line interface | `cli.py`, `cli_commands.py`, `cli_signals.py`, `process_lock.py`, `__main__.py` |
 
 ## Ingestion path
 
@@ -62,6 +62,13 @@ isolation or block live UI reads. Connections load sqlite-vec once and use forei
 keys, WAL, `synchronous=NORMAL` and a busy timeout. Long conversion/network work
 occurs outside transactions. `connections.py` handles lifecycle and lease cleanup.
 Do not run multiple daemons on the same data directory; locks are not distributed.
+
+CLI/serve hold OS advisory ownership locks for both data directory and registry
+before constructing an engine. Daemon-mode CLI calls existing REST endpoints
+without opening SQLite or performing startup recovery. Direct scan/rebuild/resume
+commands keep one event loop alive until the owned job stops, then close it.
+Embedded owners can use `DataDirectoryLock` explicitly. This rejects competing
+owners; it does not enable parallel daemon processes or distributed workers.
 
 ## PDF dependency boundary
 

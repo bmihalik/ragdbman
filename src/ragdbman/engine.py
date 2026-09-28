@@ -1221,7 +1221,11 @@ class Engine:
             return {"cancel_requested": job_id}
         for name in self.registry:
             try:
-                self.get_job(name, job_id)
+                job = self.get_job(name, job_id)
+                if job["status"] in {"completed", "completed_with_errors", "failed"}:
+                    raise RagError("CONFIG_INVALID", "A finished job cannot be cancelled")
+                if job["status"] == "cancelled":
+                    return {"cancel_requested": job_id}
                 self._job_update(name, job_id, status="cancelled", finished_at=db.now())
                 return {"cancel_requested": job_id}
             except RagError as exc:

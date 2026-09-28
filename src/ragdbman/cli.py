@@ -5,6 +5,7 @@
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -15,9 +16,12 @@ import uvicorn
 
 from . import __version__
 from .chunking import fetch_tokenizer, tokenizer_path
+from .cli_commands import COMMANDS, arguments, contract, emit, exit_status, local, remote
+from .cli_signals import Interrupted, LocalSignals
 from .config import GlobalConfig
 from .diagnostics import configure_logging
 from .errors import RagError
+from .process_lock import DataDirectoryLock
 
 MEDIA_HINTS = """
 # Optional programs: disabled until explicitly configured.
@@ -50,20 +54,70 @@ def parser():
         prog="ragdbman", description="Local document intelligence and MCP server"
     )
     result.add_argument("--version", action="version", version=f"ragdbman {__version__}")
+    result.add_argument("--config", default="~/.config/ragdbman/config.toml")
+    levels = ["trace", "debug", "verbose", "info", "warning", "warn", "error", "critical"]
+    result.add_argument("--log-level", choices=levels)
     sub = result.add_subparsers(dest="command", required=True)
-    for command in ("serve", "init", "registry-repair", "fetch-tokenizer"):
+    for command in ("serve", "init", "registry-repair", "fetch-tokenizer", *COMMANDS):
         item = sub.add_parser(command)
-        item.add_argument("--config", default="~/.config/ragdbman/config.toml")
+        item.add_argument("--config", default=argparse.SUPPRESS)
         item.add_argument(
             "--log-level",
-            choices=["trace", "debug", "verbose", "info", "warning", "warn", "error", "critical"],
+            choices=levels,
+            default=argparse.SUPPRESS,
         )
+        if command in COMMANDS:
+            arguments(item, command)
         if command == "fetch-tokenizer":
             item.add_argument("--hf-repo", required=True)
             item.add_argument("--model")
             item.add_argument("--revision", default="main")
             item.add_argument("--hub-base-url", default="https://huggingface.co")
     return result
+
+
+async def run_local(config, args, method=None, kwargs=None):
+    from .engine import Engine
+
+    engine = Engine(config)
+    with LocalSignals(engine):
+        try:
+            if args.command == "registry-repair":
+                return engine.list_collections()
+            return await local(engine, args, method, kwargs)
+        finally:
+            await engine.close()
+
+
+def serve(config, level):
+    from .engine import Engine
+    from .server import ManagedServer
+    from .web import create_app
+
+    engine = Engine(config)
+    try:
+        server = ManagedServer(
+            uvicorn.Config(
+                create_app(engine),
+                host=config.server.bind,
+                port=config.server.port,
+                log_level="debug"
+                if level in {"TRACE", "DEBUG"}
+                else "info"
+                if level in {"VERBOSE", "INFO"}
+                else "warning"
+                if level == "WARN"
+                else level.lower(),
+                log_config=None,
+                timeout_graceful_shutdown=config.server.shutdown_grace_seconds,
+                proxy_headers=False,
+            ),
+            engine,
+        )
+        server.run()
+    finally:
+        if not engine.closed:
+            asyncio.run(engine.close())
 
 
 def main(argv=None):
@@ -75,49 +129,66 @@ def main(argv=None):
         config = GlobalConfig.load(args.config)
         level = (args.log_level or os.environ.get("RAGDBMAN_LOG", config.logging.level)).upper()
         configure_logging(level)
+        if args.command in COMMANDS:
+            method, kwargs = contract(
+                args
+            )  # Validate/confirm before opening databases or contacting a daemon.
+            if args.server_url is not None:
+                payload = asyncio.run(remote(args, kwargs))
+            else:
+                with DataDirectoryLock(config):
+                    payload = asyncio.run(run_local(config, args, method, kwargs))
+            emit(args, payload, snapshot=args.command == "get-job" and args.watch)
+            status = exit_status(args, payload)
+            if status:
+                raise SystemExit(status)
+            return
         if args.command == "fetch-tokenizer":
             dest = tokenizer_path(config.storage.data_dir, args.model or config.ollama.embedding_model)
             asyncio.run(fetch_tokenizer(args.hub_base_url, args.hf_repo, args.revision, dest))
             print(f"Saved tokenizer to {dest}")
             return
-        if config.server.web_auth_mode != "local" and not os.environ.get("RAGDBMAN_AUTH_TOKEN"):
+        if (
+            args.command == "serve"
+            and config.server.web_auth_mode != "local"
+            and not os.environ.get("RAGDBMAN_AUTH_TOKEN")
+        ):
             raise RagError(
                 "CONFIG_INVALID", "Set RAGDBMAN_AUTH_TOKEN before enabling authenticated server access"
             )
-        from .engine import Engine
-
-        engine = Engine(config)
-        if args.command == "registry-repair":
-            print(f"Registry repaired: {len(engine.list_collections())} collection(s)")
-            asyncio.run(engine.close())
-        else:
-            from .server import ManagedServer
-            from .web import create_app
-
-            server = ManagedServer(
-                uvicorn.Config(
-                    create_app(engine),
-                    host=config.server.bind,
-                    port=config.server.port,
-                    log_level="debug"
-                    if level in {"TRACE", "DEBUG"}
-                    else "info"
-                    if level in {"VERBOSE", "INFO"}
-                    else level.lower().replace("warn", "warning")
-                    if level == "WARN"
-                    else level.lower(),
-                    log_config=None,
-                    timeout_graceful_shutdown=config.server.shutdown_grace_seconds,
-                    proxy_headers=False,
-                ),
-                engine,
-            )
-            server.run()
+        with DataDirectoryLock(config):
+            if args.command == "registry-repair":
+                records = asyncio.run(run_local(config, args))
+                print(f"Registry repaired: {len(records)} collection(s)")
+            else:
+                serve(config, level)
+    except Interrupted as exc:
+        print(
+            json.dumps(
+                {"code": "JOB_CANCELLED", "message": "Foreground operation interrupted; cleanup completed"}
+            ),
+            file=sys.stderr,
+        )
+        raise SystemExit(exc.exit_code) from None
     except KeyboardInterrupt:
         logging.getLogger(__name__).info("Console shutdown complete")
+        if args.command != "serve":
+            raise SystemExit(130) from None
+    except BrokenPipeError:
+        raise SystemExit(1) from None
     except (RagError, OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
+        error = (
+            exc.as_dict() if isinstance(exc, RagError) else {"code": "CONFIG_INVALID", "message": str(exc)}
+        )
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(1) from exc
+    except Exception:
+        logging.getLogger(__name__).exception("Unexpected command failure")
+        print(
+            json.dumps({"code": "INTERNAL", "message": "Unexpected command failure; inspect diagnostics"}),
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

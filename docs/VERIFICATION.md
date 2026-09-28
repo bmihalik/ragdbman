@@ -4,6 +4,46 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.5.2
+
+CLI implementation and source packaging were checked on Linux on
+28 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 518 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 518 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 520 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 518 passed, 2 optional tests skipped |
+
+The 59 CLI cases cover all service-command contracts and REST route mappings,
+global flag placement, numeric filters and malformed operands, confirmation
+before engine construction, JSON/table/LLM output, exclusive manifest files,
+watch snapshots and polling, unsafe remote URLs, administrative credentials,
+ownership locks and transport failure behavior. Explicit empty daemon URLs
+and empty identifiers are rejected; connection failure is verified not to
+construct a local engine or create local storage.
+
+Real subprocess workflows create/index/query/inspect/rebuild/delete temporary
+collections through the actual CLI entry point. They verify that direct scans
+complete rather than being paused by immediate engine closure, that Ctrl+C
+pauses owned work and permits a later resume, that a competing direct command
+cannot recover an owner's live jobs, and that daemon-mode start/watch/cancel/
+resume operate through REST without taking local engine ownership. Finished-job
+history is checked after an invalid cancellation request.
+
+Embedding calls in these workflows use a local deterministic HTTP fixture,
+not real Ollama models. Installed-wheel suites run outside the source checkout.
+The Windows lock branch, non-Linux console behavior and network-filesystem
+ownership semantics are not certified by this Linux matrix. Guards require
+cooperating CLI/serve/embedded owners.
+
+Ruff, formatting, lockfile and Apache-2.0 header checks pass. In-process statement
+coverage is approximately 90%; separately spawned CLI/server/signal processes
+are exercised but not included in that coverage percentage. The supplied
+Python guide was corrected to current signatures and lifecycle semantics and
+included as `docs/PYTHON_API_GUIDE.md`.
+
 ## Version 0.5.1
 
 Output-format implementation and release packaging were checked on Linux on

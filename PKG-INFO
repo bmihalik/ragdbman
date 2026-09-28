@@ -1,6 +1,6 @@
 Metadata-Version: 2.5
 Name: ragdbman
-Version: 0.5.1
+Version: 0.5.2
 Summary: Inspectable local document intelligence, SQLite retrieval, and MCP
 Author: Bela Istvan MIHALIK
 License-Expression: Apache-2.0
@@ -138,6 +138,40 @@ allow_approximate_tokenizer = true
 ```
 
 Exact tokenization is the default requirement for document and source-code collections. Knowledge Cards embed whole YAML fields and do not need a tokenizer. The selected mode is recorded in collection metadata.
+
+## Command line and Python API
+
+Version 0.5.2 adds the requested collection, source, indexing, job, search and
+maintenance commands, plus graph and Knowledge Card queries. JSON is the
+default output; `--format table` is available for human inspection, and
+search/graph commands also support `--format llm`.
+
+```sh
+uv run ragdbman create-collection --name code --kind source_code \
+  --source-roots /home/you/Projects/app
+uv run ragdbman start-scan --collection code --root /home/you/Projects/app
+uv run ragdbman search --collection code --query "configuration loading" \
+  --mode keyword --format llm
+uv run ragdbman graph --collection code --action callers --symbol parse_config
+```
+
+Direct scans/rebuilds/resumes stay in the foreground until stopped, then close
+the engine cleanly. When `serve` owns the data, use an explicit daemon URL
+instead of starting a competing engine:
+
+```sh
+uv run ragdbman list-collections --server-url http://127.0.0.1:8765
+uv run ragdbman get-job --collection code --job-id JOB_ID --watch \
+  --server-url http://127.0.0.1:8765
+```
+
+Daemon commands use the existing `RAGDBMAN_AUTH_TOKEN` administrator credential
+when configured; no token is put in command arguments. Local CLI/serve ownership
+locks prevent accidental job recovery by a second process. See the complete
+[CLI reference](docs/CLI.md) for all 31 commands, confirmations, filters,
+foreground/daemon behavior and exit codes.
+The supplied [Python API guide](docs/PYTHON_API_GUIDE.md) is included and
+corrected to the current interfaces and lifecycle rules.
 
 ## Select a PDF backend
 
@@ -284,7 +318,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.1) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.2) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

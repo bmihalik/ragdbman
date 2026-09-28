@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.2
+
+- Extend the CLI with all 25 requested engine-service commands, retaining
+  serve/init/registry-repair/fetch-tokenizer, plus graph and Knowledge Card search.
+- Add global config/log flags, validated named arguments, repeated numeric
+  filters, JSON/table output, existing LLM presentation and exclusive manifest export.
+- Run local scan/rebuild/resume jobs to a stopped state before engine cleanup;
+  provide two-second job watching and predictable process exit statuses.
+- Add explicit `--server-url` administrative REST transport for daemon-owned
+  jobs, with environment-token auth, no redirects or local fallback, and
+  HTTPS except for loopback HTTP.
+- Acquire data-directory and registry process locks before CLI/serve engine
+  startup; add bounded foreground SIGINT/SIGTERM cleanup and resumable pauses.
+- Preserve finished job history when cancellation is requested after completion.
+- Include the supplied guide as `docs/PYTHON_API_GUIDE.md`, correcting obsolete
+  MCP mapping, job IDs, async lifecycle, collection kinds and retrieval examples.
+- Add `docs/CLI.md`, update release/API/runtime documentation and CLI regression tests.
+
 ## 0.5.1
 
 - Add deterministic `raw`/`llm` formatting to corpus queries, graph traversal,

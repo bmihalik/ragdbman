@@ -13,6 +13,8 @@ AI-assisted implementation work.
   requirements, collection semantics, and design constraints, including the
   distinction between source-code indexing and document-style indexing.
   Supplied the Knowledge Cards specification and representative card corpus.
+  Supplied the CLI extension specification and Python API guide used for the
+  0.5.2 implementation and documentation work.
 - **Technical and product direction:** Made the final decisions on technology,
   community focus, optional PDF backends, external-tool integration, and
   Apache-2.0 licensing; reviewed proposals and requested refinements.
