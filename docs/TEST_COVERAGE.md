@@ -13,6 +13,11 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 ## Coverage map
 
+`tests/test_output_formats.py` adds 28 format-contract cases. They check
+service-side raw/LLM presentation, MCP/REST defaults, no duplicate JSON in
+text mode, authorization, graph uncertainty/citations, card YAML, escaping,
+score display and no additional embedding calls.
+
 The test suite covers application behavior using temporary sources and databases.
 This map identifies the main test modules; passing cases do not establish
 compatibility with every real document, external tool version, or deployment.

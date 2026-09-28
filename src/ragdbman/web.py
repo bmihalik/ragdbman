@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, UploadFile
 from fastapi import Request as HTTPRequest
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
 from . import __version__, corpus, db
 from .engine import Engine
@@ -321,7 +321,8 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
 
     @app.post("/api/search")
     async def single_search(body: SearchRequest):
-        return await engine.search(body)
+        result = await engine.search(body)
+        return PlainTextResponse(result) if isinstance(result, str) else result
 
     @app.get("/api/corpus")
     async def corpus_catalog():
@@ -329,15 +330,18 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
 
     @app.post("/api/corpus/query")
     async def corpus_search(body: corpus.CorpusQuery):
-        return await corpus.query(engine, body, admin=True)
+        result = await corpus.query(engine, body, admin=True)
+        return PlainTextResponse(result) if isinstance(result, str) else result
 
     @app.post("/api/search/multi")
     async def multi_search(body: MultiSearchRequest):
-        return await engine.search_multi(body)
+        result = await engine.search_multi(body)
+        return PlainTextResponse(result) if isinstance(result, str) else result
 
     @app.post("/api/corpus/graph")
     async def corpus_graph(body: GraphRequest):
-        return await engine.graph(body)
+        result = await engine.graph(body)
+        return PlainTextResponse(result) if isinstance(result, str) else result
 
     @app.post("/api/knowledge-cards/search")
     async def knowledge_card_search(body: KnowledgeCardSearchRequest):

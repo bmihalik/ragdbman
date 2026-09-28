@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1
+
+- Add deterministic `raw`/`llm` formatting to corpus queries, graph traversal,
+  and administrative single/multi-collection search.
+- MCP query and graph tools default to LLM-ready text without duplicate
+  `structuredContent`; raw mode preserves complete structured envelopes.
+  REST/Python defaults remain raw, and REST text responses use UTF-8 plain text.
+- Render numbered evidence, actual score policies, file locations and compact
+  static Calls/Called by/Imports/type/reference context without generated summaries.
+- Preserve uncertainty, partial-result warnings, adaptive fences and Knowledge
+  Card YAML; graph discovery retains only the IDs needed for exact follow-up.
+- Keep tool names/counts, retrieval behavior and authentication unchanged.
+- Add output-format regression tests, guide and updated citation metadata.
+
 ## 0.5.0
 
 - Automatic Tree-sitter syntax graphs and AST-aware chunk boundaries for

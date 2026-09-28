@@ -129,8 +129,9 @@ clear-then-index behavior; it is not a shadow-index swap.
 Per-hit `graph_context` reports availability/status, parser language/fingerprint,
 overlapping entities, bounded incoming/outgoing relationships, imports, warnings
 and truncation. It does not alter retrieval scores, ordering or filters.
-MCP structured results contain this object; text results include a separately
-labelled fenced JSON block. Graph failure returns a diagnostic context while
+MCP `format="raw"` results contain this object. Default `format="llm"` results
+render compact Calls/Called by/Imports and type/reference lines instead of
+nested JSON. REST/Python default to raw. Graph failure returns a diagnostic context while
 preserving ordinary hits. No read triggers parsing, outbox replay or embedding.
 
 ## Traversal contract
@@ -151,6 +152,7 @@ The MCP query profile enforces the same collection allowlist as `corpus_query`.
 | Parameter | Meaning |
 | --- | --- |
 | collection | One source-code collection; required |
+| format | raw or llm; MCP default llm, REST/Python default raw |
 | action | find, neighbors (default), callers, callees, dependencies, inheritance, impact |
 | symbol | Case-sensitive exact name/qualified name for traversal; case-insensitive substring for find |
 | entity_id | Exact opaque ID; mutually exclusive with symbol |
@@ -175,3 +177,5 @@ select an ID rather than assume the first one is correct. `not_indexed` and
 `not_found` are distinct. Traversal is cycle-safe and has an internal 5,000
 inspection budget in addition to depth/output limits. Provenance remains
 relative-path based, and all retrieved evidence is untrusted content.
+These fields describe raw output. LLM mode renders readable chains with
+file/line citations and uncertainty labels; see [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).

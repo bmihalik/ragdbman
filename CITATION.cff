@@ -10,8 +10,8 @@ title: ragdbman
 authors:
   - family-names: MIHALIK
     given-names: Bela Istvan
-version: "0.5.0"
-date-released: "2026-09-26"
+version: "0.5.1"
+date-released: "2026-09-28"
 license: Apache-2.0
 abstract: >-
   An inspectable local document intelligence system in Python, with independent

@@ -21,6 +21,7 @@ The Python service is organized around a shared `Engine`. Transport code validat
 | Facts and keywords | `metadata.py` |
 | Scanning and indexing | `scanner.py`, extraction dispatcher, indexing/jobs in `engine.py` |
 | Retrieval | `search.py` |
+| Deterministic raw/LLM presentation | `formatting.py`, request format selection in shared services |
 | Source syntax graphs | `graph/parser.py`, `graph/store.py`, `graph/query.py`, `graph/schema.sql` |
 | Shared application engine | `engine.py` |
 | Blocking-work isolation and cancellation cleanup | `workers.py` |
@@ -110,6 +111,13 @@ The overview's Ollama health probe has a three-second
 deadline, including time waiting for an embedding request slot.
 
 ## Retrieval path
+
+Format selection happens in the shared service rather than in a client.
+REST/Python request models default to raw dictionaries; MCP query defaults and
+its specialized graph request default to readable strings. The MCP adapter
+emits either structured JSON or text-only content, while REST converts strings
+to UTF-8 plain-text responses. Formatting does not call retrieval again or
+perform summarization. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).
 
 Structured predicates narrow eligible chunk IDs. FTS5 supplies keyword ranks; sqlite-vec supplies exact vector distances. Hybrid fusion combines channel ranks, and multi-collection fusion combines independent collection ranks. Results include evidence and filter diagnostics rather than synthesized answers.
 

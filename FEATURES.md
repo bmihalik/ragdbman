@@ -140,6 +140,12 @@ Numeric facts are only extracted from explicit supported labels. Unrelated numbe
 
 ## Service interfaces
 
+Query/graph output has `raw` and `llm` presentations. MCP defaults to readable
+text without duplicated metadata; REST/Python default to existing JSON.
+The renderer flattens graph context, preserves provenance locations and
+uncertainty, and does not synthesize summaries or change retrieval.
+See [output formats](docs/OUTPUT_FORMATS.md).
+
 The service provides three operational MCP tools (`corpus_describe`, `corpus_query`, `corpus_graph`)
 and three additional tools on the separately authorized admin profile
 (`corpus_manage`, `corpus_ingest`, `corpus_job`). The admin profile can be disabled

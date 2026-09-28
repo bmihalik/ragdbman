@@ -12,7 +12,7 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
 from . import corpus, corpus_admin
 from .engine import Engine
-from .graph.query import GraphRequest
+from .graph.query import MCPGraphRequest
 from .models import SearchFilters
 
 
@@ -21,6 +21,12 @@ def structured(payload):
         content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, indent=2))],
         structuredContent=payload,
     )
+
+
+def presented(payload):
+    if isinstance(payload, str):
+        return CallToolResult(content=[TextContent(type="text", text=payload)])
+    return structured(payload)
 
 
 def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
@@ -54,7 +60,8 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
             "Query documents, source code and Knowledge Cards in one or more collections. "
             "Omitted collections use the configured default scope. Modes: keyword, semantic, hybrid. "
             "Perspective expert weights card applicability/counter-indications; documents use general. "
-            "limit is global. Returns structured results plus numbered Markdown/YAML evidence."
+            "limit is global. format=llm (default) returns readable excerpts and static graph context; "
+            "format=raw returns full structured JSON."
         ),
         annotations=readonly,
     )
@@ -67,6 +74,7 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
         minimum_score: float | None = None,
         filters: SearchFilters | None = None,
         include_graph_context: bool | None = None,
+        format: Literal["raw", "llm"] = "llm",
     ) -> CallToolResult:
         response = await corpus.query(
             engine,
@@ -79,23 +87,22 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
                 minimum_score=minimum_score,
                 filters=filters or SearchFilters(),
                 include_graph_context=include_graph_context,
+                format=format,
             ),
             admin=admin,
         )
-        return CallToolResult(
-            content=[TextContent(type="text", text=corpus.render(response))],
-            structuredContent=response,
-        )
+        return presented(response)
 
     @server.tool(
         description="Read the source-code syntax graph. Actions: find, neighbors, callers, callees, "
         "dependencies, inheritance, impact. Select exact symbol or entity_id; ambiguous matches "
-        "return candidates. Static resolution is best-effort, not a runtime call graph.",
+        "return candidates. Static resolution is best-effort, not a runtime call graph. "
+        "request.format defaults to llm; choose raw for full JSON.",
         annotations=readonly,
     )
-    async def corpus_graph(request: GraphRequest) -> CallToolResult:
+    async def corpus_graph(request: MCPGraphRequest) -> CallToolResult:
         corpus.scope(engine, [request.collection], admin=admin)
-        return structured(await engine.graph(request))
+        return presented(await engine.graph(request))
 
     if admin:
         mutation = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)

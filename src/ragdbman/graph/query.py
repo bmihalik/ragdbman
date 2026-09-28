@@ -20,6 +20,7 @@ LIMITATION = "Parser-observed syntax with best-effort static resolution; not a c
 
 
 class GraphRequest(Request):
+    format: Literal["raw", "llm"] = "raw"
     collection: str
     action: Literal["find", "neighbors", "callers", "callees", "dependencies", "inheritance", "impact"] = (
         "neighbors"
@@ -41,6 +42,10 @@ class GraphRequest(Request):
         if self.action != "find" and not (self.entity_id or self.symbol or self.source_id):
             raise ValueError("A symbol, entity_id or source_id is required")
         return self
+
+
+class MCPGraphRequest(GraphRequest):
+    format: Literal["raw", "llm"] = "llm"
 
 
 class Reader:
@@ -451,7 +456,8 @@ def enrich(primary_factory, store, results, context_limit):
                 relationships=[],
                 imports=json.loads(source["imports_json"])[:context_limit],
                 warnings=json.loads(source["warnings_json"]),
-                truncated=source["status"] == "truncated",
+                truncated=source["status"] == "truncated"
+                or len(json.loads(source["imports_json"])) > context_limit,
             )
             start, end = result.get("line_start"), result.get("line_end")
             if start is not None and end is not None:

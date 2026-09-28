@@ -11,12 +11,18 @@ See [MCP contracts and security](MCP.md) for setup, actions and examples.
 The official Python MCP SDK implements stateless Streamable HTTP with JSON responses,
 initialization, schema discovery, and typed calls. Query arguments are flat:
 `query`, `collections`, `mode`, `perspective`, `limit`, `minimum_score`, `filters`,
-`include_graph_context`. The graph tool takes a `request` object described in
+`include_graph_context`, `format`. The graph tool takes a `request` object described in
 [SOURCE_GRAPH.md](SOURCE_GRAPH.md).
 Management tools accept a discriminated `request` object with an `action` and
 only the fields valid for that action. The bare `/mcp` path exposes no tools.
 
 Tool errors include the stable application error code in the error text. Returned content can include structured content as well as text content; clients should use standard MCP result handling and the published tool schemas.
+
+MCP query/graph tools default to readable `llm` output with no duplicate JSON.
+REST `/api/corpus/query`, `/api/corpus/graph`, `/api/search` and `/api/search/multi`
+accept `format="raw"|"llm"` in the body, defaulting to raw JSON. Explicit LLM
+mode returns UTF-8 `text/plain`, not a JSON string; default UI behavior is
+unchanged. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md) for examples and scope.
 
 ## REST routes
 

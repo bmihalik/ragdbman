@@ -114,6 +114,9 @@ discovery does not expose database paths, managed directories or source roots.
 - `include_graph_context`: null/omitted enables graph enrichment for source-code
   collections only; false disables enrichment. True does not build graphs for
   other collection kinds. This adds context, not another retrieval pass.
+- `format`: `llm` by default for MCP, returning readable text without duplicate
+  nested JSON; `raw` returns the complete structured payload. REST/Python
+  defaults remain raw. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).
 
 Modes describe retrieval channels; perspective describes the card scoring strategy.
 There is no separate single-query, multi-query or card-query MCP tool.
@@ -148,9 +151,10 @@ validation and authorization errors return MCP tool errors. Card hybrid retrieva
 can fall back to keyword when Ollama is unavailable and reports that fallback.
 Semantic-only failures are not hidden.
 
-## Reply envelope and readable evidence
+## Raw reply envelope and readable evidence
 
-`corpus_query` returns MCP `structuredContent` with:
+With `format="raw"`, `corpus_query` returns MCP `structuredContent` and a JSON
+text representation with:
 
 ```text
 query
@@ -165,15 +169,16 @@ results[]
   relevance: score, policy, vector, keyword, collection_rank, fusion_score
   provenance
   content
+  graph_context (source-code results when enabled)
 ```
 
-The text part contains numbered headings such as `Result 1 · Knowledge Card`.
-Navigation labels are fixed; untrusted titles/provenance are quoted inside a
-JSON block. Card content is fenced YAML with multiline code represented as
-literal blocks. Fence lengths expand when retrieved content contains backticks,
-and trailing code newlines are preserved. Document/source snippets use text
-fences. Card content is complete; document text may be truncated according to
-`search.return_context_chars_per_chunk` and is marked accordingly.
+The default `format="llm"` instead returns one text block without
+`structuredContent`, with numbered result headings, scores, location labels
+and compact natural-language graph context. Untrusted labels are escaped,
+single-line inline code; card content is fenced YAML with literal multiline
+code. Adaptive fences preserve embedded backticks and trailing newlines.
+Document/source snippets use text fences and retain truncation warnings.
+Full examples and uncertainty semantics are in [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).
 
 Only top-level card IDs are removed; references, nested values and code text are
 preserved. Ordinary operational provenance omits internal IDs and filesystem paths.
@@ -195,6 +200,9 @@ Actions are `find`, `neighbors`, `callers`, `callees`, `dependencies`,
 can restrict selection or select the file module. Ambiguous names return
 candidates instead of guessing. See [SOURCE_GRAPH.md](SOURCE_GRAPH.md) for the
 full contract, static-analysis limitations and provenance semantics.
+Set `request.format="raw"` for structured graph data; omitted format defaults
+to `llm` on MCP. Graph `find`/ambiguous replies retain candidate IDs for exact
+follow-up selection, while ordinary readable chains omit metadata IDs.
 
 ## Administration contracts
 

@@ -79,7 +79,7 @@ def test_wire_profiles_and_no_admin_bypass(cfg, fake, source_dir, secrets):
         assert engine.get_collection("ok")
         query = rpc(client, "corpus_query", {"query": "anything", "collections": ["ok"], "mode": "keyword"})
         answer = query.json()["result"]
-        assert answer["structuredContent"]["results"] == []
+        assert "structuredContent" not in answer
         assert "No results met" in answer["content"][0]["text"]
         scan = rpc(
             client,

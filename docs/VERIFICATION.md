@@ -4,6 +4,33 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.5.1
+
+Output-format implementation and release packaging were checked on Linux on
+28 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 459 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 459 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 461 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 459 passed, 2 optional tests skipped |
+
+The 28 new formatting cases cover raw/LLM defaults and validation, MCP wire
+responses on both profiles, text-only output without duplicate structured
+content, raw envelope parity, REST content types and authorization, all graph
+actions, uncertainty and truncation, candidate selection, safe inline labels
+and adaptive fences, YAML code preservation, score policies and small-score
+precision, general/card/source output, and unchanged embedding-call counts.
+Existing card/MCP tests now explicitly distinguish default text from raw mode.
+
+Tests use actual parsers/SQLite and deterministic embedding doubles. No
+formatting request needs an LLM; native client frameworks such as Claude or
+Perplexity were not individually tested. The default web UI JSON path and
+all prior indexing/recovery/shutdown regressions pass. Complete matrix runs
+were executed serially; installed-wheel tests run outside the source directory.
+Ruff, formatting and first-party Apache-2.0 header checks pass.
+
 ## Version 0.5.0
 
 Source-graph implementation and release packaging were checked on Linux on

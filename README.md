@@ -6,6 +6,12 @@ Collections use SQLite files and embeddings come from Ollama. The shared engine 
 
 ## Source-code knowledge graphs
 
+Version 0.5.1 adds service-side output formatting. MCP `corpus_query` and
+`corpus_graph` default to `format="llm"`: readable evidence with compact graph
+context, not nested provenance JSON. Choose `format="raw"` for the complete
+structured response; REST and Python APIs retain raw defaults.
+See [output formats and examples](docs/OUTPUT_FORMATS.md).
+
 Version 0.5.0 automatically extracts source-code entities and relationships with
 Tree-sitter while indexing `source_code` collections. Supported graph grammars
 are Python, Rust, C, C++, JavaScript/JSX, TypeScript/TSX, Go, Java and C#.
@@ -238,7 +244,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.0) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.1) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

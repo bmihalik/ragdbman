@@ -295,13 +295,17 @@ async def test_rest_mcp_yaml_and_multi_search(engine, source_dir):
     blocks = await app.state.mcp.call_tool(
         "corpus_query", {"collections": ["cards"], "query": "queue", "mode": "keyword"}
     )
-    # FastMCP can return content blocks plus structured content.
-    assert "id" not in blocks.structuredContent["results"][0]["content"]
+    # Default MCP output is text-only; raw mode remains explicitly available.
+    assert blocks.structuredContent is None
     assert "```yaml" in blocks.content[0].text
+    raw = await app.state.mcp.call_tool(
+        "corpus_query", {"collections": ["cards"], "query": "queue", "mode": "keyword", "format": "raw"}
+    )
+    assert "id" not in raw.structuredContent["results"][0]["content"]
     empty = await app.state.mcp.call_tool(
         "corpus_query", {"collections": ["cards"], "query": "nonexistentword", "mode": "keyword"}
     )
-    assert empty.structuredContent["results"] == []
+    assert empty.structuredContent is None
     assert "No results met" in empty.content[0].text
 
 

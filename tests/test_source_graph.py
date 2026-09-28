@@ -330,7 +330,7 @@ def test_graph_wire_scope_and_rest_auth(cfg, fake, source_dir, monkeypatch):
             partial(indexed, engine, source_dir, {"a.py": "def fn():\n    return 1\n"}, name="allowed")
         )
         request = {"collection": "allowed", "action": "find", "symbol": "fn"}
-        answer = rpc(client, "corpus_graph", {"request": request}).json()["result"]
+        answer = rpc(client, "corpus_graph", {"request": {**request, "format": "raw"}}).json()["result"]
         assert not answer.get("isError"), answer
         assert answer["structuredContent"]["candidates"][0]["name"] == "fn"
         rest = client.post("/api/corpus/graph", headers={"Authorization": "Bearer " + ADMIN}, json=request)
@@ -343,10 +343,11 @@ def test_graph_wire_scope_and_rest_auth(cfg, fake, source_dir, monkeypatch):
                 "query": "fn",
                 "mode": "keyword",
                 "include_graph_context": True,
+                "format": "raw",
             },
         ).json()["result"]
         assert response["structuredContent"]["results"][0]["graph_context"]["available"]
-        assert "Static source graph context" in response["content"][0]["text"]
+        assert "graph_context" in response["content"][0]["text"]
 
 
 @pytest.mark.parametrize(

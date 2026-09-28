@@ -219,6 +219,10 @@ class Engine:
         from .graph.query import GraphRequest, traverse
 
         req = GraphRequest.model_validate(request) if isinstance(request, dict) else request
+        if req.format == "llm":
+            from .formatting import render_graph
+
+            return render_graph(await self.graph(req.model_copy(update={"format": "raw"})))
         meta = self.get_collection(req.collection)
         if meta["kind"] != "source_code" or not self.config.graph.enabled:
             raise RagError("CONFIG_INVALID", "Graph access requires an enabled source-code collection")
@@ -1249,6 +1253,14 @@ class Engine:
 
     async def search(self, request: SearchRequest | dict):
         req = SearchRequest.model_validate(request) if isinstance(request, dict) else request
+        if req.format == "llm":
+            from .formatting import render_search
+
+            return render_search(
+                await self.search(req.model_copy(update={"format": "raw"})),
+                req,
+                [self.get_collection(req.collection)],
+            )
         meta = self.get_collection(req.collection)
         if meta["kind"] == "knowledge_cards":
             from .knowledge_cards import dump_cards
@@ -1353,6 +1365,13 @@ class Engine:
 
     async def search_multi(self, request: MultiSearchRequest | dict):
         req = MultiSearchRequest.model_validate(request) if isinstance(request, dict) else request
+        if req.format == "llm":
+            from .formatting import render_search
+
+            response = await self.search_multi(req.model_copy(update={"format": "raw"}))
+            return render_search(
+                response, req, [self.get_collection(name) for name in response["collections_searched"]]
+            )
         successful, failed, results, applied, skipped = [], [], [], [], []
         for name in dict.fromkeys(req.collections):
             try:

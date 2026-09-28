@@ -60,6 +60,7 @@ class SearchFilters(Request):
 
 
 class SearchRequest(Request):
+    format: Literal["raw", "llm"] = "raw"
     include_graph_context: bool | None = None
     collection: str
     query: str
@@ -71,6 +72,7 @@ class SearchRequest(Request):
 
 
 class MultiSearchRequest(Request):
+    format: Literal["raw", "llm"] = "raw"
     include_graph_context: bool | None = None
     collections: list[str]
     query: str

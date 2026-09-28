@@ -9,11 +9,12 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .errors import RagError
-from .knowledge_cards import dump_cards
+from .formatting import render_corpus
 from .models import Request, SearchFilters, SearchRequest
 
 
 class CorpusQuery(Request):
+    format: Literal["raw", "llm"] = "raw"
     include_graph_context: bool | None = None
     query: str = Field(min_length=1)
     collections: list[str] | None = None
@@ -107,6 +108,8 @@ def describe(engine, collections=None, admin=False):
 
 
 async def query(engine, request: CorpusQuery, admin=False):
+    if request.format == "llm":
+        return render(await query(engine, request.model_copy(update={"format": "raw"}), admin=admin))
     names = scope(engine, request.collections, admin)
     limit = min(request.limit, engine.config.search.max_top_k)
     mode = "vector" if request.mode == "semantic" else request.mode
@@ -276,52 +279,6 @@ async def query(engine, request: CorpusQuery, admin=False):
     )
 
 
-def fence(text, language):
-    import re
-
-    length = max([3, *[len(m) + 1 for m in re.findall(r"`+", text)]])
-    marker = "`" * length
-    separator = "" if text.endswith("\n") else "\n"
-    return f"{marker}{language}\n{text}{separator}{marker}"
-
-
 def render(response):
-    """Fixed labels distinguish untrusted retrieved content from navigation."""
-    import json
-
-    parts = ["# Corpus query results", f"{len(response['results'])} results."]
-    for item in response["results"]:
-        label = {
-            "knowledge_card": "Knowledge Card",
-            "source_code": "Source code",
-            "document": "Document excerpt",
-        }[item["kind"]]
-        # Titles and collection names are JSON-quoted inside a fence, never interpolated as instructions.
-        parts.append(f"## Result {item['rank']} · {label}")
-        parts.append(
-            fence(
-                json.dumps(
-                    dict(title=item["title"], collection=item["collection"], provenance=item["provenance"]),
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                "json",
-            )
-        )
-        parts.append(
-            fence(dump_cards([item["content"]]), "yaml")
-            if item["kind"] == "knowledge_card"
-            else fence(item["content"] or "", "text")
-        )
-        if "graph_context" in item:
-            parts.extend(
-                [
-                    "### Static source graph context",
-                    fence(json.dumps(item["graph_context"], ensure_ascii=False, indent=2), "json"),
-                ]
-            )
-    if not response["results"]:
-        parts.append("No results met the requested scope, filters and relevance thresholds.")
-    if response["warnings"]:
-        parts.extend(["## Diagnostics", fence(json.dumps(response["warnings"], indent=2), "json")])
-    return "\n\n".join(parts)
+    """Readable evidence without exposing the internal graph envelope."""
+    return render_corpus(response)
