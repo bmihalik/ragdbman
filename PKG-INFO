@@ -1,6 +1,6 @@
 Metadata-Version: 2.5
 Name: ragdbman
-Version: 0.5.2
+Version: 0.5.3
 Summary: Inspectable local document intelligence, SQLite retrieval, and MCP
 Author: Bela Istvan MIHALIK
 License-Expression: Apache-2.0
@@ -13,7 +13,7 @@ Requires-Dist: defusedxml<1,>=0.7
 Requires-Dist: fastapi<1,>=0.115
 Requires-Dist: httpx<1,>=0.27
 Requires-Dist: markdown-it-py<5,>=3
-Requires-Dist: mcp<2,>=1.12
+Requires-Dist: mcp<2,>=1.30.0
 Requires-Dist: mobi<1,>=0.3
 Requires-Dist: openpyxl<4,>=3.1
 Requires-Dist: pydantic<3,>=2.9
@@ -43,6 +43,16 @@ Description-Content-Type: text/markdown
 An inspectable, local document intelligence system, implemented in Python. Organize named collections, follow indexing jobs, inspect Markdown sidecars and SQLite records, and retrieve source-backed evidence through MCP, REST, or the administrative UI.
 
 Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: three operational tools, with three additional administrative tools available separately.
+
+Version 0.5.3 tightens the MCP dependency to `>=1.30.0,<2` and stops advertising
+unused prompt/resource capabilities on both MCP profiles. The three operational
+tools remain unchanged; no index rebuild or re-embedding is required.
+
+After replacing the source, stop the old daemon, run `uv sync --locked`, then
+start with `uv run --locked ragdbman serve`. Preserve any optional extras in both
+commands (for example, `--extra pymupdf`). Reload or reconnect your MCP client
+so it discovers the current capabilities; Hermes users can use `/reload-mcp`
+or restart Hermes. See [MCP setup and troubleshooting](docs/MCP.md).
 
 ## Source-code knowledge graphs
 
@@ -324,7 +334,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.2) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.3) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

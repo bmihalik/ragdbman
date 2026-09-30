@@ -1,5 +1,20 @@
 # Architecture
 
+## MCP capability boundary
+
+`CorpusMCP` in `mcp_server.py` subclasses FastMCP and removes unused
+prompt/resource handlers immediately after the SDK's normal handler setup.
+Both operational and administrative profiles use this factory. Initialization
+therefore omits these capabilities, while unsupported protocol methods return
+Method Not Found instead of an empty catalog. Tool registration and authorization
+are unchanged.
+
+The `_setup_handlers` hook and low-level handler map are a deliberately small
+private-SDK compatibility boundary. The dependency is `mcp>=1.30.0,<2`, with
+1.30.0 locked, and wire-level regression tests cover both profiles. Future SDK
+updates must rerun discovery and teardown tests; ragdbman does not monkeypatch
+the SDK transport or silence its error logger.
+
 The MCP boundary is implemented in `mcp_server.py`, with read-only contracts in
 `corpus.py` and discriminated management actions in `corpus_admin.py`. Query and
 admin transports use separate tool registries/session managers and share

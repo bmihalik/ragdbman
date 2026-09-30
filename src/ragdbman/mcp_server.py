@@ -6,6 +6,7 @@
 import json
 from typing import Literal
 
+from mcp import types as mcp_types
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
@@ -14,6 +15,29 @@ from . import corpus, corpus_admin
 from .engine import Engine
 from .graph.query import MCPGraphRequest
 from .models import SearchFilters
+
+
+class CorpusMCP(FastMCP):
+    """Tools-only MCP profile; no unused prompt/resource capabilities.
+
+    FastMCP 1.x registers these handlers unconditionally, even with empty
+    managers. Low-level capability discovery is inferred from handler presence.
+    Keep this small SDK compatibility boundary covered by initialize/wire tests;
+    removing handlers also returns Method Not Found for unsupported requests.
+    """
+
+    def _setup_handlers(self) -> None:
+        super()._setup_handlers()
+        for request_type in (
+            mcp_types.ListPromptsRequest,
+            mcp_types.GetPromptRequest,
+            mcp_types.ListResourcesRequest,
+            mcp_types.ReadResourceRequest,
+            mcp_types.ListResourceTemplatesRequest,
+            mcp_types.SubscribeRequest,
+            mcp_types.UnsubscribeRequest,
+        ):
+            self._mcp_server.request_handlers.pop(request_type, None)
 
 
 def structured(payload):
@@ -33,7 +57,7 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
     if admin and not engine.config.server.mcp_admin_enabled:
         raise ValueError("Administrative MCP profile is disabled")
     profile = "admin" if admin else "query"
-    server = FastMCP(
+    server = CorpusMCP(
         "ragdbman",
         instructions=(
             "Use corpus_describe to discover accessible collections and capabilities. "

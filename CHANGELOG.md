@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.3
+
+- Require MCP SDK `>=1.30.0,<2`; retain the tested 1.30.0 lockfile resolution.
+  Expected stateless transport teardown is handled by the SDK, without a
+  ragdbman log filter or third-party transport monkeypatch.
+- Make both MCP profiles tools-only: omit unused prompt/resource capabilities
+  from initialization and remove their handlers, including resource templates
+  and subscriptions. Unsupported requests return JSON-RPC Method Not Found.
+- Preserve three query tools, six admin tools, authentication, collection scope,
+  and raw/LLM output contracts. No index rebuild or re-embedding is required.
+- Add discovery, unsupported-method, repeated/concurrent ping, expected and
+  unexpected stream-closure, and dependency-metadata regression tests.
+- Document isolated-environment installation and client capability refresh.
+
 ## 0.5.2
 
 - Web UI follow-up: expose raw/LLM search formats, graph-context controls,

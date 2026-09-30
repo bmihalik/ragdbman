@@ -4,6 +4,70 @@ ragdbman exposes one small operational interface for all collection kinds, with
 administration available on a separate, optional endpoint. Both endpoints use
 stateless MCP Streamable HTTP with the official SDK.
 
+## Tools-only discovery and SDK requirement
+
+Version 0.5.3 requires `mcp>=1.30.0,<2`; `uv.lock` selects 1.30.0. Both profiles
+advertise tools but omit `prompts` and `resources` from the initialization
+capabilities. They do not register handlers for prompt listing/retrieval,
+resource listing/reading, resource templates or resource subscriptions.
+Requests for those methods return JSON-RPC error `-32601` (Method Not Found).
+The three query tools and six admin tools below are unchanged.
+
+This is an explicit boundary around FastMCP's default registration of empty
+prompt/resource managers, not a new retrieval interface; the upstream behavior
+is visible in [FastMCP 1.30.0](https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/v1.30.0/src/mcp/server/fastmcp/server.py).
+No database changes, rescanning or re-embedding are needed for this patch.
+
+### Applying the patch
+
+Stop the existing daemon before replacing its source and installing dependencies.
+From the release directory, use the isolated locked environment:
+
+```sh
+uv sync --locked
+uv run --locked ragdbman serve
+```
+
+If you use optional extras, preserve them in both commands, for example
+`uv sync --locked --extra pymupdf` and
+`uv run --locked --extra pymupdf ragdbman serve`. Do not assume an old daemon
+loading packages from `~/.local` is using the project's lockfile.
+Check the selected SDK with:
+
+```sh
+uv run --locked python -c 'from importlib.metadata import version; print(version("ragdbman"), version("mcp"))'
+```
+
+Reconnect the MCP client to refresh its cached initialization capabilities.
+Hermes supports `/reload-mcp` or a restart and can expose prompt/resource
+operations as client-side tool wrappers; those are not ragdbman's `corpus_`
+tools ([Hermes MCP configuration](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)).
+For older or non-capability-aware Hermes installations, explicitly disable
+the utility wrappers by merging this fragment into the existing server entry,
+preserving its URL and authentication settings:
+
+```yaml
+mcp_servers:
+  ragdbman:
+    tools:
+      resources: false
+      prompts: false
+```
+
+These utility switches are documented in the
+[Hermes MCP configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/).
+The server cannot delete tool definitions already cached by a client.
+
+### Stateless teardown logs
+
+`Terminating session: None` can remain an ordinary INFO message for this
+stateless transport. SDK 1.30.0 handles a closed read stream after termination
+at DEBUG while retaining ERROR logging for unexpected closure, as shown in
+the [SDK transport implementation](https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/v1.30.0/src/mcp/server/streamable_http.py).
+ragdbman does not suppress all `ClosedResourceError` exceptions or filter
+transport ERROR logs. An unexpected closure still needs investigation; an
+HTTP 200 status alone does not prove that the JSON-RPC operation succeeded.
+
 ## Profiles and authentication
 
 | Profile | Endpoint | Exposed tools |

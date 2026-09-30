@@ -4,6 +4,16 @@ An inspectable, local document intelligence system, implemented in Python. Organ
 
 Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: three operational tools, with three additional administrative tools available separately.
 
+Version 0.5.3 tightens the MCP dependency to `>=1.30.0,<2` and stops advertising
+unused prompt/resource capabilities on both MCP profiles. The three operational
+tools remain unchanged; no index rebuild or re-embedding is required.
+
+After replacing the source, stop the old daemon, run `uv sync --locked`, then
+start with `uv run --locked ragdbman serve`. Preserve any optional extras in both
+commands (for example, `--extra pymupdf`). Reload or reconnect your MCP client
+so it discovers the current capabilities; Hermes users can use `/reload-mcp`
+or restart Hermes. See [MCP setup and troubleshooting](docs/MCP.md).
+
 ## Source-code knowledge graphs
 
 Version 0.5.1 adds service-side output formatting. MCP `corpus_query` and
@@ -284,7 +294,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.2) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.3) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).

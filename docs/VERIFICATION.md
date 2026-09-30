@@ -4,6 +4,46 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.5.3
+
+MCP capability/dependency changes and release packaging were checked on Linux
+on 30 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 542 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 542 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 544 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 542 passed, 2 optional tests skipped |
+
+All runs used MCP SDK 1.30.0 and AnyIO 4.15.1. Full suites ran serially,
+and installed-wheel suites ran outside the source checkout. Wheel metadata
+was inspected and tested for the `mcp>=1.30.0,<2` requirement.
+
+The 22 new cases exercise actual HTTP initialization for both authenticated
+profiles, absence of prompt/resource capability fields, unchanged three/six
+tool counts, usable `corpus_describe`, and Method Not Found responses for
+unused prompt/resource/template/subscription operations. Each profile receives
+ten serial and twenty concurrent stateless pings, with successful JSON-RPC
+results and no MCP ERROR logs.
+
+A deterministic transport lifecycle test closes the stream before its router
+begins receiving and verifies the expected terminated-stream DEBUG message.
+A separate injected unexpected closure must still produce an ERROR carrying
+`ClosedResourceError`. This verifies that the patch relies on SDK behavior
+rather than hiding transport errors.
+
+Ruff, formatting, lockfile consistency and first-party Apache-2.0 header checks
+pass. Existing Starlette test-client and `imghdr` dependency deprecation warnings
+remain; no new prompt/resource or transport warning suppression is introduced.
+No frontend files were changed, so the browser checks below remain the latest
+UI-specific verification rather than being claimed as rerun for this patch.
+
+These are local automated checks, not a live Hermes acceptance test or proof
+that every possible transport failure is resolved. The user's client must
+reload/reconnect to refresh discovery. Real Ollama/model-quality and MinerU
+3.4.5 acceptance boundaries remain unchanged.
+
 ## Version 0.5.2
 
 ### Web UI follow-up
