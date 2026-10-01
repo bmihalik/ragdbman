@@ -366,10 +366,14 @@ third-party packages, external converters or model weights.
 ## Badges
 
 [![Python tests](https://github.com/bmihalik/ragdbman/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/bmihalik/ragdbman/actions/workflows/tests.yml)
+
 [![Coverage](https://codecov.io/gh/bmihalik/ragdbman/branch/master/graph/badge.svg)](https://codecov.io/gh/bmihalik/ragdbman)
+
 [![M8ven Score](https://m8ven.ai/badge/mcp/bmihalik/ragdbman?variant=verified)](https://m8ven.ai/mcp/bmihalik/ragdbman)
+
 [![License](https://img.shields.io/github/license/bmihalik/ragdbman)](LICENSE)
+
 [![Python](https://img.shields.io/badge/Python-%3E%3D3.11-blue?logo=python&logoColor=white)](https://www.python.org/)
 
-https://codecov.io/gh/bmihalik/ragdbman/graphs/sunburst.svg?token=F4E5Q5HFO9
+[![Codecov_Stats](https://codecov.io/gh/bmihalik/ragdbman/graphs/sunburst.svg?token=F4E5Q5HFO9)]
 
