@@ -24,10 +24,9 @@ automatic (null), include (true), or omit (false). This affects source-code
 enrichment only, not ranking or other collection kinds. Changing a control
 does not requery automatically; submit Search to request a new snapshot.
 
-Knowledge Cards keep their expert/general and minimum-similarity controls.
-Raw card results use the specialized JSON/YAML endpoint; LLM card results use
-the unified corpus endpoint, mapping vector to semantic, query type to
-perspective, top-k to limit and minimum similarity to minimum score.
+Knowledge Cards keep expert/general and cutoff controls, using the public
+`perspective`, `limit` and `minimum_score` fields. All raw/LLM queries, including
+single/multiple collections and cards, use `POST /api/corpus-query`.
 Structured document filters remain available as JSON on ordinary/multi search.
 Empty multi-collection selections are rejected before an API request.
 
@@ -87,10 +86,13 @@ Retrieved names, snippets and output are escaped before display. Forms retain
 their input on errors and restore their submit state. Existing job-record
 snapshot/selection behavior remains unchanged.
 
-Graph pages are `/graph` and `/collections/{name}/graph`; both retain
+Graph pages are `/corpus-graph` and `/collections/{name}/corpus-graph`; both retain
 administrative web authentication. Query-only MCP credentials cannot access
 them. No token, database schema or indexing change is required for these UI
 controls; restart the daemon to load new routes and refresh the browser assets.
+Query pages are `/corpus-query` and `/collections/{name}/corpus-query`.
+All administrative actions use named POST operations from [INTERFACES.md](INTERFACES.md);
+uploads use the shared base64 contract, and manifest inspection uses its named operation.
 
 `tests/browser_search_graph.mjs` exercises request formats, graph controls,
 candidate selection, card mappings, error/empty/disabled states, hostile text,

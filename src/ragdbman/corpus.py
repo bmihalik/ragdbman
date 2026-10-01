@@ -16,17 +16,19 @@ from .models import Request, SearchFilters, SearchRequest
 class CorpusQuery(Request):
     format: Literal["raw", "llm"] = "raw"
     include_graph_context: bool | None = None
-    query: str = Field(min_length=1)
+    query: str
     collections: list[str] | None = None
-    mode: Literal["keyword", "semantic", "hybrid"] = "hybrid"
+    mode: Literal["keyword", "semantic", "hybrid", "structured"] = "hybrid"
     perspective: Literal["general", "expert"] = "general"
     limit: int = Field(5, ge=1, strict=True)
     minimum_score: float | None = Field(None, ge=0, le=1, allow_inf_nan=False)
     filters: SearchFilters = Field(default_factory=SearchFilters)
+    include_text: bool = True
+    include_links: bool = True
 
     @model_validator(mode="after")
     def nonempty(self):
-        if not self.query.strip() or self.collections == []:
+        if (not self.query.strip() and self.mode != "structured") or self.collections == []:
             raise ValueError("query and explicit collections must not be empty")
         return self
 
@@ -50,11 +52,11 @@ def scope(engine, requested, admin=False, catalog=False):
     return names
 
 
-def describe(engine, collections=None, admin=False):
+def corpus_describe(engine, collections=None, admin=False):
     catalog = collections is None
     records = []
     for name in scope(engine, collections, admin, catalog=True):
-        meta = engine.get_collection(name)
+        meta = engine.collection_get(name)
         is_card = meta["kind"] == "knowledge_cards"
         item = dict(
             name=name,
@@ -62,7 +64,7 @@ def describe(engine, collections=None, admin=False):
             kind=meta["kind"],
             counts=meta["counts"],
             capabilities=dict(
-                modes=["keyword", "semantic", "hybrid"],
+                modes=["keyword", "semantic", "hybrid"] + ([] if is_card else ["structured"]),
                 perspectives=["general", "expert"] if is_card else ["general"],
                 filters=[] if is_card else list(SearchFilters.model_fields),
                 graph_context=meta["kind"] == "source_code" and engine.config.graph.enabled,
@@ -96,7 +98,7 @@ def describe(engine, collections=None, admin=False):
                 if is_card
                 else [
                     {k: f[k] for k in ("canonical_name", "value_type")}
-                    for f in engine.list_metadata_fields(name)
+                    for f in engine.collection_list_metadata_fields(name)
                 ]
             )
         records.append(item)
@@ -107,16 +109,16 @@ def describe(engine, collections=None, admin=False):
     )
 
 
-async def query(engine, request: CorpusQuery, admin=False):
+async def corpus_query(engine, request: CorpusQuery, admin=False):
     if request.format == "llm":
-        return render(await query(engine, request.model_copy(update={"format": "raw"}), admin=admin))
+        return render(await corpus_query(engine, request.model_copy(update={"format": "raw"}), admin=admin))
     names = scope(engine, request.collections, admin)
     limit = min(request.limit, engine.config.search.max_top_k)
     mode = "vector" if request.mode == "semantic" else request.mode
     results, warnings, searched, effective = [], [], [], []
     for name in names:
         try:
-            meta = engine.get_collection(name)
+            meta = engine.collection_get(name)
             is_card = meta["kind"] == "knowledge_cards"
             applied_perspective = request.perspective if is_card else "general"
             if request.perspective == "expert" and not is_card:
@@ -128,7 +130,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                     )
                 )
             if is_card:
-                if any(request.filters.model_dump().values()):
+                if request.mode == "structured" or any(request.filters.model_dump().values()):
                     raise RagError("CONFIG_INVALID", "Knowledge Cards do not support document filters")
                 minimum = (
                     engine.kc_settings.min_similarity
@@ -136,7 +138,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                     else request.minimum_score
                 )
                 diagnostics = {}
-                matches = await engine.search_knowledge_cards(
+                matches = await engine._query_cards(
                     collection=name,
                     query=request.query,
                     mode=mode,
@@ -159,7 +161,9 @@ async def query(engine, request: CorpusQuery, admin=False):
                         provenance=dict(
                             filename=Path(m["source_path"]).name, references=m["card"].get("source", [])
                         ),
-                        content={k: v for k, v in m["card"].items() if k != "id"},
+                        content={k: v for k, v in m["card"].items() if k != "id"}
+                        if request.include_text
+                        else None,
                     )
                     for m in matches
                 ]
@@ -174,7 +178,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                 score_policy = "confidence_weighted"
             else:
                 # Fail closed rather than letting the document engine ignore unknown numeric fields.
-                fields = engine.list_metadata_fields(name)
+                fields = engine.collection_list_metadata_fields(name)
                 available = {f["canonical_name"].lower() for f in fields}
                 import json
 
@@ -183,7 +187,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                     raise RagError(
                         "CONFIG_INVALID", "A numeric filter field is unsupported by this collection"
                     )
-                response = await engine.search(
+                response = await engine._query_documents(
                     SearchRequest(
                         collection=name,
                         query=request.query,
@@ -191,6 +195,8 @@ async def query(engine, request: CorpusQuery, admin=False):
                         top_k=engine.config.search.max_top_k,
                         filters=request.filters,
                         include_graph_context=request.include_graph_context,
+                        include_text=request.include_text,
+                        include_links=request.include_links,
                     )
                 )
                 if response["skipped_filters"]:
@@ -200,6 +206,7 @@ async def query(engine, request: CorpusQuery, admin=False):
                     "keyword": "bm25_strength",
                     "semantic": "inverse_l2",
                     "hybrid": "weighted_rrf",
+                    "structured": "constant_match",
                 }[request.mode]
                 converted = []
                 for m in response["results"]:

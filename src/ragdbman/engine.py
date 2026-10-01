@@ -59,6 +59,57 @@ PROGRESS = dict(
 
 
 class Engine:
+    async def collection_upload_file(self, collection, filename, content_base64):
+        """Store a new managed upload and index it; all transports use the same contract."""
+        import base64
+        import binascii
+
+        if (
+            filename in {"", ".", ".."}
+            or any(c in filename for c in "/\\\0")
+            or any(ord(c) < 32 for c in filename)
+        ):
+            raise RagError("CONFIG_INVALID", "Upload filename must be a single printable filename")
+        maximum = self.config.defaults.max_file_size_mb * 1024 * 1024
+        if len(content_base64) > 4 * ((maximum + 2) // 3):
+            raise RagError("FILE_TOO_LARGE", "Upload exceeds configured limit")
+        try:
+            data = await run_sync(lambda: base64.b64decode(content_base64, validate=True))
+        except (ValueError, binascii.Error) as exc:
+            raise RagError("CONFIG_INVALID", "Invalid base64 upload") from exc
+        if len(data) > maximum:
+            raise RagError("FILE_TOO_LARGE", "Upload exceeds configured limit")
+        meta = self.collection_get(collection)
+        self._not_busy(collection)
+        target = self.config.checked_path(
+            Path(meta["managed_root"]) / f"{db.uid()}-{filename}", meta["managed_root"]
+        )
+
+        def write():
+            with target.open("xb") as stream:
+                stream.write(data)
+
+        await run_sync(write)
+        result = await self._add_file(collection, str(target), origin="upload")
+        return {**result, "path": str(target)}
+
+    async def corpus_query(self, request=None, **kwargs):
+        """Unified document/source/card retrieval; raw by default."""
+        from .corpus import CorpusQuery, corpus_query
+
+        req = (
+            request
+            if isinstance(request, CorpusQuery)
+            else CorpusQuery.model_validate(request if request is not None else kwargs)
+        )
+        return await corpus_query(self, req, admin=True)
+
+    def corpus_describe(self, collections=None):
+        """Describe collections to the trusted local/REST administrator."""
+        from .corpus import corpus_describe
+
+        return corpus_describe(self, collections, admin=True)
+
     def __init__(self, config: GlobalConfig, embedder: Embedder | None = None):
         from .knowledge_cards import Settings
 
@@ -82,7 +133,7 @@ class Engine:
         self.pdf_lock = asyncio.Lock()
         self.locks: dict[str, asyncio.Lock] = {}
         self.registry: dict[str, dict] = {}
-        self.repair_registry()
+        self.collections_registry_repair()
         self.recover()
         log.info(
             "Engine ready collections=%d file_concurrency=%d embedding_concurrency=%d",
@@ -215,15 +266,22 @@ class Engine:
             queue(conn, source_id, snapshot)
         self._flush_graph(collection)
 
-    async def graph(self, request):
+    async def corpus_graph(self, request=None, **kwargs):
+        from .graph.query import GraphRequest
+
+        request = (
+            request
+            if isinstance(request, GraphRequest)
+            else GraphRequest.model_validate(request if request is not None else kwargs)
+        )
         from .graph.query import GraphRequest, traverse
 
         req = GraphRequest.model_validate(request) if isinstance(request, dict) else request
         if req.format == "llm":
             from .formatting import render_graph
 
-            return render_graph(await self.graph(req.model_copy(update={"format": "raw"})))
-        meta = self.get_collection(req.collection)
+            return render_graph(await self.corpus_graph(req.model_copy(update={"format": "raw"})))
+        meta = self.collection_get(req.collection)
         if meta["kind"] != "source_code" or not self.config.graph.enabled:
             raise RagError("CONFIG_INVALID", "Graph access requires an enabled source-code collection")
         try:
@@ -246,7 +304,9 @@ class Engine:
             ),
         )
 
-    def repair_registry(self):
+    def collections_registry_repair(self):
+        if self.active or self.operation_tasks:
+            raise RagError("COLLECTION_BUSY", "Cannot repair registry while indexing is active")
         self.registry = {}
         for path in sorted((self.base / "collections").glob("*/*.sqlite")):
             if path.name != f"{path.parent.name}.sqlite":
@@ -264,7 +324,7 @@ class Engine:
             except Exception:
                 log.exception("Cannot reconcile collection %s; database left untouched", path)
         self._save_registry()
-        return self.list_collections()
+        return self.collections_list()
 
     def recover(self):
         for name in self.registry:
@@ -295,10 +355,10 @@ class Engine:
                     )
             self._flush_graph(name)
 
-    def list_collections(self) -> list[dict]:
-        return [self.get_collection(n) for n in sorted(self.registry)]
+    def collections_list(self) -> list[dict]:
+        return [self.collection_get(n) for n in sorted(self.registry)]
 
-    def get_collection(self, name: str) -> dict:
+    def collection_get(self, name: str) -> dict:
         with self.connection(name) as conn:
             result = db.collection(conn, self.db_path(name))
             if result["kind"] == "knowledge_cards":
@@ -321,8 +381,12 @@ class Engine:
             self.config.defaults.allow_approximate_tokenizer,
         )
 
-    async def create_collection(self, request: CreateCollection | None = None, **kwargs) -> dict:
-        req = request or CreateCollection(**kwargs)
+    async def collection_create(self, request: CreateCollection | dict | None = None, **kwargs) -> dict:
+        req = (
+            request
+            if isinstance(request, CreateCollection)
+            else CreateCollection.model_validate(request if request is not None else kwargs)
+        )
         self._not_busy(req.name)
         self._name(req.name)
         if req.name in self.registry or self.db_path(req.name).exists():
@@ -403,7 +467,7 @@ class Engine:
                         "source_roots",
                         dict(id=db.uid(), path=root, recursive=1, status="active", created_at=db.now()),
                     )
-                db.audit(conn, "create_collection")
+                db.audit(conn, "collection_create")
             if req.kind == "knowledge_cards":
                 from .knowledge_cards import initialize_schema as initialize_kc_schema
 
@@ -417,7 +481,7 @@ class Engine:
             raise
         finally:
             conn.close()
-        return self.get_collection(req.name)
+        return self.collection_get(req.name)
 
     def _not_busy(self, name):
         if self.shutting_down:
@@ -425,19 +489,17 @@ class Engine:
         if name in self.active or self.locks.get(name, asyncio.Lock()).locked():
             raise RagError("COLLECTION_BUSY", f"Collection {name} has an active mutation")
 
-    def update_collection_config(self, name: str, description: str | None = None, rebuild: bool = False):
-        if rebuild:
-            raise RagError("CONFIG_INVALID", "Use rebuild_collection explicitly")
+    def collection_config_update(self, name: str, description: str | None = None):
         self._not_busy(name)
         with self.connection(name) as conn:
             conn.execute("UPDATE collection_meta SET description=?,updated_at=?", (description, db.now()))
-        result = self.get_collection(name)
+        result = self.collection_get(name)
         self._save_registry()
         return result
 
-    def delete_collection(self, name: str, confirm: bool = False, delete_files: bool = False):
+    def collection_delete(self, name: str, confirm: bool = False, delete_files: bool = False):
         require_confirmation(confirm)
-        self.get_collection(name)
+        self.collection_get(name)
         self._not_busy(name)
         path = self.db_path(name)
         # Persist destructive intent outside the database being deleted.
@@ -446,7 +508,7 @@ class Engine:
             stream.write(
                 json.dumps(
                     dict(
-                        action="delete_collection", name=name, delete_files=delete_files, created_at=db.now()
+                        action="collection_delete", name=name, delete_files=delete_files, created_at=db.now()
                     )
                 )
                 + "\n"
@@ -464,12 +526,12 @@ class Engine:
         self._save_registry()
         return {"deleted": name}
 
-    def list_source_roots(self, collection: str):
+    def collection_list_roots(self, collection: str):
         with self.connection(collection) as conn:
             return db.rows(conn, "SELECT * FROM source_roots ORDER BY created_at")
 
-    def add_source_root(self, collection: str, path: str, recursive: bool = True):
-        meta = self.get_collection(collection)
+    def collection_add_root(self, collection: str, path: str, recursive: bool = True):
+        meta = self.collection_get(collection)
         root = self.config.checked_path(path, meta["managed_root"])
         if not root.is_dir():
             raise RagError("PATH_NOT_ALLOWED", "Source root must be an existing directory")
@@ -490,14 +552,15 @@ class Engine:
                 )
         return {"root_id": root_id}
 
-    def remove_source_root(self, collection: str, root_id: str):
+    def collection_remove_root(self, collection: str, root_id: str, confirm: bool = False):
+        require_confirmation(confirm)
         self._not_busy(collection)
         with self.connection(collection) as conn, db.transaction(conn):
             conn.execute("UPDATE sources SET root_id=NULL WHERE root_id=?", (root_id,))
             conn.execute("DELETE FROM source_roots WHERE id=?", (root_id,))
         return {"removed": root_id}
 
-    def list_sources(
+    def collection_list_files(
         self,
         collection: str,
         extension: str | None = None,
@@ -528,7 +591,7 @@ class Engine:
             source["collection_id"] = self.registry[collection]["id"]
         return result
 
-    def get_source(self, collection: str, source_id: str):
+    def collection_get_file(self, collection: str, source_id: str):
         with self.connection(collection) as conn:
             row = conn.execute(
                 "SELECT * FROM sources WHERE id=? AND deleted_at IS NULL", (source_id,)
@@ -537,7 +600,10 @@ class Engine:
             raise RagError("SOURCE_NOT_FOUND", source_id)
         return {**dict(row), "collection_id": self.registry[collection]["id"]}
 
-    async def add_file(self, collection: str, path: str, origin: str = "filesystem"):
+    async def collection_add_file(self, collection: str, path: str):
+        return await self._add_file(collection, path)
+
+    async def _add_file(self, collection: str, path: str, origin: str = "filesystem"):
         self._not_busy(collection)
         task = asyncio.current_task()
         self.operation_tasks.add(task)
@@ -552,7 +618,7 @@ class Engine:
     ):
         started = time.monotonic()
         log.debug("Index start collection=%s job=%s path=%s", collection, job_id, path)
-        meta = meta if meta is not None else self.get_collection(collection)
+        meta = meta if meta is not None else self.collection_get(collection)
         path = self.config.checked_path(path, meta["managed_root"])
         if self.config.storage.markdown_sidecar_dir_name in path.parts:
             raise RagError("PATH_NOT_ALLOWED", "Sidecar output is never indexed as an original source")
@@ -846,7 +912,7 @@ class Engine:
             )
         return {"source_id": source_id, "chunks": 0, "classification": classification, "skipped": False}
 
-    def remove_source(
+    def collection_remove_file(
         self,
         collection: str,
         source_id: str,
@@ -855,10 +921,10 @@ class Engine:
     ):
         require_confirmation(confirm)
         self._not_busy(collection)
-        source = self.get_source(collection, source_id)
+        source = self.collection_get_file(collection, source_id)
         to_delete = None
         if delete_original_managed_file:
-            managed = Path(self.get_collection(collection)["managed_root"]).resolve()
+            managed = Path(self.collection_get(collection)["managed_root"]).resolve()
             candidate = Path(source["canonical_path"]).resolve()
             if not candidate.is_relative_to(managed):
                 raise RagError("PATH_NOT_ALLOWED", "Original file deletion is restricted to managed uploads")
@@ -867,21 +933,30 @@ class Engine:
             db.delete_chunks(conn, source_id)
             conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
             db.refresh_keywords(conn)
-            db.audit(conn, "remove_source", self.registry[collection]["id"], source_id)
+            db.audit(conn, "collection_remove_file", self.registry[collection]["id"], source_id)
         self._flush_graph(collection)
         if to_delete:
             to_delete.unlink(missing_ok=True)
         return {"removed": source_id}
 
-    def start_scan(self, collection: str, root: str, recursive: bool = True, prune_missing: bool = False):
-        meta = self.get_collection(collection)
+    def scan_start(
+        self,
+        collection: str,
+        root: str,
+        recursive: bool = True,
+        prune_missing: bool = False,
+        confirm: bool = False,
+    ):
+        if prune_missing:
+            require_confirmation(confirm)
+        meta = self.collection_get(collection)
         if collection in self.active:
-            return self.get_job(collection, self.active[collection])
+            return self.scan_job_get(collection, self.active[collection])
         self._not_busy(collection)
         root_path = self.config.checked_path(root, meta["managed_root"])
         if not root_path.is_dir():
             raise RagError("PATH_NOT_ALLOWED", "Scan root must be an existing directory")
-        root_id = self.add_source_root(collection, str(root_path), recursive)["root_id"]
+        root_id = self.collection_add_root(collection, str(root_path), recursive)["root_id"]
         job_id = db.uid()
         with self.connection(collection) as conn:
             db.insert(
@@ -906,7 +981,7 @@ class Engine:
                 ),
             )
         self._launch(collection, job_id)
-        return self.get_job(collection, job_id)
+        return self.scan_job_get(collection, job_id)
 
     def _launch(self, collection, job_id):
         log.info(
@@ -919,14 +994,14 @@ class Engine:
         self.cancel_flags[job_id] = threading.Event()
         self.tasks[job_id] = asyncio.create_task(self._scan(collection, job_id), name=f"scan:{collection}")
 
-    def get_job(self, collection: str, job_id: str):
+    def scan_job_get(self, collection: str, job_id: str):
         with self.connection(collection) as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise RagError("JOB_NOT_FOUND", job_id)
             return db.decode_job(row)
 
-    def list_jobs(self, collection: str, status: str | None = None, limit: int = 50):
+    def scan_jobs_list(self, collection: str, status: str | None = None, limit: int = 50):
         with self.connection(collection) as conn:
             query = (
                 "SELECT * FROM jobs"
@@ -977,7 +1052,7 @@ class Engine:
             db.refresh_keywords(conn)
 
     async def _scan(self, collection, job_id):
-        job = self.get_job(collection, job_id)
+        job = self.scan_job_get(collection, job_id)
         params = job["params"]
         progress = dict(PROGRESS)
         seen = set()
@@ -995,7 +1070,7 @@ class Engine:
                 progress=progress,
             )
             async with self.locks.setdefault(collection, asyncio.Lock()):
-                scan_meta = self.get_collection(collection)
+                scan_meta = self.collection_get(collection)
                 if params.get("rebuild"):
                     with self.connection(collection) as conn:
                         paths = [
@@ -1173,7 +1248,7 @@ class Engine:
                         error_summary="\n".join(errors[-20:]) or None,
                         finished_at=db.now(),
                     )
-                    self.get_collection(collection)
+                    self.collection_get(collection)
                     self._save_registry()
                     log.info(
                         "Job finished collection=%s job=%s status=%s completed=%d unchanged=%d failed=%d skipped=%d",
@@ -1210,7 +1285,7 @@ class Engine:
 
             await _drain(asyncio.create_task(finalize()))
 
-    def cancel_job(self, job_id: str):
+    def scan_job_cancel(self, job_id: str):
         flag = self.cancel_flags.get(job_id)
         if flag:
             flag.set()
@@ -1221,7 +1296,7 @@ class Engine:
             return {"cancel_requested": job_id}
         for name in self.registry:
             try:
-                job = self.get_job(name, job_id)
+                job = self.scan_job_get(name, job_id)
                 if job["status"] in {"completed", "completed_with_errors", "failed"}:
                     raise RagError("CONFIG_INVALID", "A finished job cannot be cancelled")
                 if job["status"] == "cancelled":
@@ -1233,9 +1308,9 @@ class Engine:
                     raise
         raise RagError("JOB_NOT_FOUND", job_id)
 
-    def resume_job(self, collection: str, job_id: str):
+    def scan_job_resume(self, collection: str, job_id: str):
         self._not_busy(collection)
-        job = self.get_job(collection, job_id)
+        job = self.scan_job_get(collection, job_id)
         if job["kind"] not in {"scan", "rebuild"} or job["status"] not in {
             "paused",
             "failed",
@@ -1253,25 +1328,25 @@ class Engine:
             progress=dict(PROGRESS),
         )
         self._launch(collection, job_id)
-        return self.get_job(collection, job_id)
+        return self.scan_job_get(collection, job_id)
 
-    async def search(self, request: SearchRequest | dict):
+    async def _query_documents(self, request: SearchRequest | dict):
         req = SearchRequest.model_validate(request) if isinstance(request, dict) else request
         if req.format == "llm":
             from .formatting import render_search
 
             return render_search(
-                await self.search(req.model_copy(update={"format": "raw"})),
+                await self._query_documents(req.model_copy(update={"format": "raw"})),
                 req,
-                [self.get_collection(req.collection)],
+                [self.collection_get(req.collection)],
             )
-        meta = self.get_collection(req.collection)
+        meta = self.collection_get(req.collection)
         if meta["kind"] == "knowledge_cards":
             from .knowledge_cards import dump_cards
 
             if req.mode == "structured" or any(req.filters.model_dump().values()):
                 raise RagError("CONFIG_INVALID", "Knowledge Cards do not support document structured filters")
-            matches = await self.search_knowledge_cards(
+            matches = await self._query_cards(
                 collection=req.collection, query=req.query, mode=req.mode, top_k=req.top_k
             )
             return dict(
@@ -1317,7 +1392,7 @@ class Engine:
                     result["graph_context"] = dict(available=False, status="unavailable")
         return response
 
-    async def search_knowledge_cards(
+    async def _query_cards(
         self,
         request: KnowledgeCardSearchRequest | dict | None = None,
         diagnostics: dict | None = None,
@@ -1330,7 +1405,7 @@ class Engine:
             if isinstance(request, dict)
             else request or KnowledgeCardSearchRequest(**kwargs)
         )
-        meta = self.get_collection(req.collection)
+        meta = self.collection_get(req.collection)
         if meta["kind"] != "knowledge_cards":
             raise RagError("CONFIG_INVALID", f"{req.collection} is not a Knowledge Cards collection")
         settings = self.kc_settings
@@ -1367,19 +1442,19 @@ class Engine:
             partial(self.connection, req.collection),
         )
 
-    async def search_multi(self, request: MultiSearchRequest | dict):
+    async def _query_many(self, request: MultiSearchRequest | dict):
         req = MultiSearchRequest.model_validate(request) if isinstance(request, dict) else request
         if req.format == "llm":
             from .formatting import render_search
 
-            response = await self.search_multi(req.model_copy(update={"format": "raw"}))
+            response = await self._query_many(req.model_copy(update={"format": "raw"}))
             return render_search(
-                response, req, [self.get_collection(name) for name in response["collections_searched"]]
+                response, req, [self.collection_get(name) for name in response["collections_searched"]]
             )
         successful, failed, results, applied, skipped = [], [], [], [], []
         for name in dict.fromkeys(req.collections):
             try:
-                response = await self.search(
+                response = await self._query_documents(
                     SearchRequest(
                         collection=name,
                         **req.model_dump(exclude={"collections", "top_k"}),
@@ -1404,7 +1479,9 @@ class Engine:
             skipped_filters=skipped,
         )
 
-    def list_keywords(self, collection: str, query: str | None = None, limit: int = 50, offset: int = 0):
+    def collection_list_keywords(
+        self, collection: str, query: str | None = None, limit: int = 50, offset: int = 0
+    ):
         with self.connection(collection) as conn:
             return db.rows(
                 conn,
@@ -1413,22 +1490,22 @@ class Engine:
                 ((query or "").lower(), min(max(limit, 1), 10000), max(offset, 0)),
             )
 
-    def list_metadata_fields(self, collection: str):
+    def collection_list_metadata_fields(self, collection: str):
         with self.connection(collection) as conn:
             return db.rows(conn, "SELECT * FROM metadata_fields ORDER BY canonical_name")
 
-    def rebuild_collection(self, collection: str, confirm: bool = False):
+    def collection_rebuild(self, collection: str, confirm: bool = False):
         require_confirmation(confirm)
         self._not_busy(collection)
-        meta = self.get_collection(collection)
-        # Rebuild indexes all existing source paths, including add_file/upload entries
+        meta = self.collection_get(collection)
+        # Rebuild indexes all existing source paths, including collection_add_file/upload entries
         # which are not necessarily under a registered scan root.
         with self.connection(collection) as conn, db.transaction(conn):
             for source in db.rows(conn, "SELECT id FROM sources"):
                 db.delete_chunks(conn, source["id"])
             conn.execute("UPDATE sources SET status='queued',content_hash_sha256=NULL")
             conn.execute("DELETE FROM keywords")
-            db.audit(conn, "rebuild_collection", meta["id"])
+            db.audit(conn, "collection_rebuild", meta["id"])
         if meta["kind"] == "source_code":
             self._reset_graph(collection)
         job_id = db.uid()
@@ -1456,19 +1533,19 @@ class Engine:
                 ),
             )
         self._launch(collection, job_id)
-        return self.get_job(collection, job_id)
+        return self.scan_job_get(collection, job_id)
 
-    def vacuum_collection(self, collection: str):
+    def collection_vacuum(self, collection: str):
         self._not_busy(collection)
         with self.connection(collection) as conn:
             conn.execute("VACUUM")
-            db.audit(conn, "vacuum_collection", self.registry[collection]["id"])
+            db.audit(conn, "collection_vacuum", self.registry[collection]["id"])
         return {"vacuumed": collection}
 
-    def export_collection_manifest(self, collection: str):
+    def collection_export_manifest(self, collection: str):
         with self.connection(collection) as conn:
             sources = db.rows(conn, "SELECT * FROM sources ORDER BY canonical_path")
-        return {"collection": self.get_collection(collection), "sources": sources, "exported_at": db.now()}
+        return {"collection": self.collection_get(collection), "sources": sources, "exported_at": db.now()}
 
     async def health_status(self):
         try:

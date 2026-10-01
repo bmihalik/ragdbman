@@ -97,4 +97,4 @@ async def engine(cfg, fake, source_dir):
 
 async def finish(engine, name, job):
     await asyncio.wait_for(engine.tasks[job["id"]], 15)
-    return engine.get_job(name, job["id"])
+    return engine.scan_job_get(name, job["id"])

@@ -53,11 +53,11 @@ async def check(archive):
         )
         engine = Engine(cfg, TestEmbedder())
         try:
-            await engine.create_collection(name="corpus", kind="knowledge_cards", source_roots=[str(sources)])
+            await engine.collection_create(name="corpus", kind="knowledge_cards", source_roots=[str(sources)])
             for unchanged in (False, True):
-                job = engine.start_scan("corpus", str(sources))
+                job = engine.scan_start("corpus", str(sources))
                 await asyncio.wait_for(engine.tasks[job["id"]], 300)
-                result = engine.get_job("corpus", job["id"])
+                result = engine.scan_job_get("corpus", job["id"])
                 assert result["status"] == "completed", result
                 assert result["progress"]["unchanged" if unchanged else "completed"] == len(cards)
             with engine.connection("corpus") as conn:
@@ -70,7 +70,7 @@ async def check(archive):
                     assert yaml.safe_load(dump_cards([payload])) == expected
             for mode in ("keyword", "vector", "hybrid"):
                 for query_type in ("general", "expert"):
-                    matches = await engine.search_knowledge_cards(
+                    matches = await engine._query_cards(
                         collection="corpus",
                         query="breadth first search graph queue",
                         mode=mode,

@@ -22,7 +22,7 @@ from ragdbman.workers import run_async, run_sync
 
 @pytest.mark.parametrize("stage", ["text", "pdf", "chunk", "write"])
 async def test_overview_and_cancel_respond_during_indexing(engine, source_dir, monkeypatch, stage):
-    await engine.create_collection(name="busy")
+    await engine.collection_create(name="busy")
     entered, release = threading.Event(), threading.Event()
     owner = threading.get_ident()
     worker_threads = []
@@ -58,7 +58,9 @@ async def test_overview_and_cancel_respond_during_indexing(engine, source_dir, m
 
     app = create_app(engine, manage_engine=False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://testserver") as client:
-        response = await client.post("/api/collections/busy/scan", json={"root": str(source_dir)})
+        response = await client.post(
+            "/api/scan-start", json={**({"root": str(source_dir)}), "collection": "busy"}
+        )
         assert response.status_code == 200
         job = response.json()
         try:
@@ -68,20 +70,23 @@ async def test_overview_and_cancel_respond_during_indexing(engine, source_dir, m
             assert worker_threads and owner not in worker_threads
             assert not engine.tasks[job["id"]].done()
             before = time.monotonic()
-            for url in [
-                "/",
-                "/static/app.js",
-                "/api/collections",
-                "/api/collections/busy",
-                f"/api/collections/busy/jobs/{job['id']}",
-            ]:
+            for url in ["/", "/static/app.js"]:
                 response = await asyncio.wait_for(client.get(url), 1)
                 assert response.status_code == 200
+            for operation, body in [
+                ("collections-list", {}),
+                ("collection-get", {"name": "busy"}),
+                ("scan-job-get", {"collection": "busy", "job_id": job["id"]}),
+            ]:
+                response = await asyncio.wait_for(client.post("/api/" + operation, json=body), 1)
+                assert response.status_code == 200
             assert time.monotonic() - before < 2
-            cancelled = await asyncio.wait_for(client.post(f"/api/jobs/{job['id']}/cancel"), 1)
+            cancelled = await asyncio.wait_for(
+                client.post("/api/scan-job-cancel", json={"job_id": job["id"]}), 1
+            )
             assert cancelled.status_code == 200
             with pytest.raises(RagError, match="COLLECTION_BUSY"):
-                engine.delete_collection("busy", confirm=True)
+                engine.collection_delete("busy", confirm=True)
         finally:
             release.set()
             result = await finish(engine, "busy", job)
@@ -133,10 +138,10 @@ async def test_async_converter_cancellation_runs_cleanup():
 
 
 async def test_shutdown_during_write_rolls_back_before_unlock(engine, source_dir, monkeypatch):
-    await engine.create_collection(name="closing")
+    await engine.collection_create(name="closing")
     path = source_dir / "paper.txt"
     path.write_text("Original indexed evidence.")
-    result = await engine.add_file("closing", str(path))
+    result = await engine.collection_add_file("closing", str(path))
     with engine.connection("closing") as conn:
         original = db.rows(conn, "SELECT id,text FROM chunks")
     path.write_text("Replacement evidence. Price: EUR 25.")
@@ -149,7 +154,7 @@ async def test_shutdown_during_write_rolls_back_before_unlock(engine, source_dir
         batch(conn, terms)
 
     monkeypatch.setattr(db, "batch_keywords", held)
-    job = engine.start_scan("closing", str(source_dir))
+    job = engine.scan_start("closing", str(source_dir))
     assert await asyncio.to_thread(entered.wait, 3)
     shutdown = asyncio.create_task(engine.close())
     try:
@@ -157,11 +162,11 @@ async def test_shutdown_during_write_rolls_back_before_unlock(engine, source_dir
         assert not shutdown.done()
         assert "closing" in engine.active
         with pytest.raises(RagError, match="SERVER_SHUTTING_DOWN"):
-            engine.delete_collection("closing", confirm=True)
+            engine.collection_delete("closing", confirm=True)
     finally:
         release.set()
         await asyncio.wait_for(shutdown, 3)
-    assert engine.get_job("closing", job["id"])["status"] == "paused"
+    assert engine.scan_job_get("closing", job["id"])["status"] == "paused"
     with engine.connection("closing") as conn:
         assert db.rows(conn, "SELECT id,text FROM chunks") == original
         assert (
@@ -183,12 +188,12 @@ async def test_health_probe_is_bounded_when_embedder_is_busy(engine, fake):
 
 
 async def test_pruning_keeps_overview_responsive_and_cancel_rolls_back(engine, source_dir, monkeypatch):
-    await engine.create_collection(name="pruning")
+    await engine.collection_create(name="pruning")
     path = source_dir / "paper.txt"
     path.write_text("Persistent evidence.")
-    job = engine.start_scan("pruning", str(source_dir))
+    job = engine.scan_start("pruning", str(source_dir))
     assert (await finish(engine, "pruning", job))["status"] == "completed"
-    source = engine.list_sources("pruning")[0]
+    source = engine.collection_list_files("pruning")[0]
     path.unlink()
     entered, release = threading.Event(), threading.Event()
     delete = db.delete_chunks
@@ -202,7 +207,7 @@ async def test_pruning_keeps_overview_responsive_and_cancel_rolls_back(engine, s
         delete(conn, source_id)
 
     monkeypatch.setattr(db, "delete_chunks", held)
-    job = engine.start_scan("pruning", str(source_dir), prune_missing=True)
+    job = engine.scan_start("pruning", str(source_dir), prune_missing=True, confirm=True)
     try:
         assert await asyncio.to_thread(entered.wait, 10)
         assert owner not in threads
@@ -210,16 +215,16 @@ async def test_pruning_keeps_overview_responsive_and_cancel_rolls_back(engine, s
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app), base_url="http://testserver"
         ) as client:
-            response = await asyncio.wait_for(client.get("/api/collections"), 1)
+            response = await asyncio.wait_for(client.post("/api/collections-list", json={}), 1)
             assert response.status_code == 200
             assert response.json()[0]["counts"]["chunks"] > 0
-            assert (await client.post(f"/api/jobs/{job['id']}/cancel")).status_code == 200
+            assert (await client.post("/api/scan-job-cancel", json={"job_id": job["id"]})).status_code == 200
     finally:
         release.set()
         result = await finish(engine, "pruning", job)
     assert result["status"] == "cancelled"
-    assert engine.get_source("pruning", source["id"])["status"] == "indexed"
-    assert engine.get_collection("pruning")["counts"]["chunks"] > 0
+    assert engine.collection_get_file("pruning", source["id"])["status"] == "indexed"
+    assert engine.collection_get("pruning")["counts"]["chunks"] > 0
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX process termination check")

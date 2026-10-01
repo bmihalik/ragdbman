@@ -16,6 +16,7 @@ from mcp.server.streamable_http import StreamableHTTPServerTransport
 from packaging.requirements import Requirement
 
 from ragdbman.engine import Engine
+from ragdbman.operations import OPERATIONS, QUERY_OPERATIONS
 from ragdbman.web import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +48,7 @@ def post(client, profile, method, params=None, identifier=1):
     )
 
 
-@pytest.mark.parametrize("profile,count", [("query", 3), ("admin", 6)])
+@pytest.mark.parametrize("profile,count", [("query", 3), ("admin", len(OPERATIONS))])
 def test_initialize_advertises_only_used_capabilities(wire, profile, count):
     response = post(
         wire,
@@ -68,7 +69,7 @@ def test_initialize_advertises_only_used_capabilities(wire, profile, count):
     assert "mcp-session-id" not in response.headers
     tools = post(wire, profile, "tools/list").json()["result"]["tools"]
     assert len(tools) == count
-    assert all(t["name"].startswith("corpus_") for t in tools)
+    assert {t["name"] for t in tools} == (set(OPERATIONS) if profile == "admin" else QUERY_OPERATIONS)
     assert not {t["name"] for t in tools} & {"list_prompts", "get_prompt", "list_resources", "read_resource"}
     described = post(wire, profile, "tools/call", {"name": "corpus_describe", "arguments": {}})
     assert not described.json()["result"].get("isError"), described.text
@@ -109,7 +110,7 @@ def test_repeated_and_concurrent_stateless_pings(wire, profile, caplog):
     assert all("mcp-session-id" not in r.headers for r in results)
     assert not [r for r in caplog.records if r.name.startswith("mcp.server") and r.levelno >= logging.ERROR]
     assert len(post(wire, profile, "tools/list").json()["result"]["tools"]) == (
-        3 if profile == "query" else 6
+        3 if profile == "query" else len(OPERATIONS)
     )
 
 
@@ -157,7 +158,7 @@ def test_installed_package_requires_supported_sdk():
 @pytest.mark.parametrize("profile", ["query", "admin"])
 def test_tools_list_declares_all_four_boolean_hints(wire, profile):
     readonly_names = {"corpus_describe", "corpus_query", "corpus_graph"}
-    mutation_names = {"corpus_manage", "corpus_ingest", "corpus_job"}
+    mutation_names = set(OPERATIONS) - readonly_names
     response = post(wire, profile, "tools/list")
     assert response.status_code == 200
     tools = response.json()["result"]["tools"]
@@ -165,11 +166,11 @@ def test_tools_list_declares_all_four_boolean_hints(wire, profile):
         readonly_names | mutation_names if profile == "admin" else readonly_names
     )
     for tool in tools:
-        readonly = tool["name"] in readonly_names
+        spec = OPERATIONS[tool["name"]]
         expected = {
-            "readOnlyHint": readonly,
-            "destructiveHint": not readonly,
-            "idempotentHint": readonly,
+            "readOnlyHint": spec.readonly,
+            "destructiveHint": spec.destructive,
+            "idempotentHint": spec.idempotent,
             "openWorldHint": False,
         }
         annotations = tool["annotations"]

@@ -37,9 +37,9 @@ async def code(engine, source_dir):
 async def test_corpus_raw_and_llm_same_evidence_no_extra_calls(code, fake):
     req = corpus.CorpusQuery(query="parse_config", collections=["code"], mode="keyword")
     before = len(fake.calls)
-    raw = await corpus.query(code, req)
+    raw = await corpus.corpus_query(code, req)
     snapshot = copy.deepcopy(raw)
-    text = await corpus.query(code, req.model_copy(update={"format": "llm"}))
+    text = await corpus.corpus_query(code, req.model_copy(update={"format": "llm"}))
     assert text == corpus.render(raw)
     assert raw == snapshot and len(fake.calls) == before
     for expected in (
@@ -59,7 +59,9 @@ async def test_corpus_raw_and_llm_same_evidence_no_extra_calls(code, fake):
         assert hidden not in text
     assert len(text) < len(json.dumps(raw))
     assert "This function reads and validates" not in text  # no generated summary
-    off = await corpus.query(code, req.model_copy(update={"format": "llm", "include_graph_context": False}))
+    off = await corpus.corpus_query(
+        code, req.model_copy(update={"format": "llm", "include_graph_context": False})
+    )
     assert "Calls:" not in off and "Static source graph context" not in off
 
 
@@ -77,8 +79,8 @@ async def test_corpus_raw_and_llm_same_evidence_no_extra_calls(code, fake):
 )
 async def test_graph_formats(code, action, symbol):
     req = GraphRequest(collection="code", action=action, symbol=symbol, depth=2)
-    raw = await code.graph(req)
-    text = await code.graph(req.model_copy(update={"format": "llm"}))
+    raw = await code.corpus_graph(req)
+    text = await code.corpus_graph(req.model_copy(update={"format": "llm"}))
     assert isinstance(raw, dict) and text == render_graph(raw)
     assert "best-effort static resolution" in text
     assert "content_hash" not in text and "relationship_id" not in text
@@ -95,7 +97,7 @@ async def test_search_programmatic_and_multi_formats(code, fake):
         SearchRequest(collection="code", query="parse_config", mode="keyword"),
         MultiSearchRequest(collections=["code"], query="parse_config", mode="keyword"),
     ):
-        fn = code.search if isinstance(req, SearchRequest) else code.search_multi
+        fn = code._query_documents if isinstance(req, SearchRequest) else code._query_many
         before = len(fake.calls)
         assert isinstance(await fn(req), dict)
         text = await fn(req.model_copy(update={"format": "llm"}))
@@ -113,23 +115,17 @@ def test_wire_defaults_raw_parity_and_rest(cfg, fake, source_dir, monkeypatch):
         for profile, token in (("query", QUERY), ("admin", ADMIN)):
             query = {"query": "parse_config", "collections": ["code"], "mode": "keyword"}
             graph = {"collection": "code", "symbol": "parse_config", "action": "callees"}
-            for tool, args in (("corpus_query", query), ("corpus_graph", {"request": graph})):
+            for tool, args in (("corpus_query", query), ("corpus_graph", graph)):
                 text_result = rpc(client, tool, args, profile=profile, token=token).json()["result"]
                 assert not text_result.get("isError") and "structuredContent" not in text_result
                 assert len(text_result["content"]) == 1
-                raw_args = (
-                    {**args, "format": "raw"}
-                    if tool == "corpus_query"
-                    else {"request": {**graph, "format": "raw"}}
-                )
+                raw_args = {**args, "format": "raw"}
                 raw = rpc(client, tool, raw_args, profile=profile, token=token).json()["result"]
                 assert json.loads(raw["content"][0]["text"]) == raw["structuredContent"]
                 assert "content_hash" in raw["content"][0]["text"]
         for route, body in (
-            ("/api/corpus/query", query),
-            ("/api/corpus/graph", graph),
-            ("/api/search", {"collection": "code", "query": "parse_config", "mode": "keyword"}),
-            ("/api/search/multi", {"collections": ["code"], "query": "parse_config", "mode": "keyword"}),
+            ("/api/corpus-query", query),
+            ("/api/corpus-graph", graph),
         ):
             headers = {"Authorization": "Bearer " + ADMIN}
             raw = client.post(route, headers=headers, json=body)
@@ -237,8 +233,10 @@ def test_partial_and_empty_results_and_diagnostics():
 async def test_ambiguous_graph_retains_selection_ids(code, source_dir):
     path = source_dir / "other.py"
     path.write_text("def parse_config():\n    return 1\n")
-    await code.add_file("code", str(path))
-    text = await code.graph(dict(collection="code", symbol="parse_config", action="callers", format="llm"))
+    await code.collection_add_file("code", str(path))
+    text = await code.corpus_graph(
+        dict(collection="code", symbol="parse_config", action="callers", format="llm")
+    )
     assert "ambiguous" in text and text.count("Use entity_id=") == 2
 
 
@@ -250,11 +248,13 @@ async def test_non_code_search_formats(engine, source_dir, kind):
         else {"manual.txt": "A queue holds work for a consumer."}
     )
     await indexed(engine, source_dir, files, name="docs", kind=kind)
-    response = await engine.search(dict(collection="docs", query="queue", mode="keyword", format="llm"))
+    response = await engine._query_documents(
+        dict(collection="docs", query="queue", mode="keyword", format="llm")
+    )
     assert "Calls:" not in response
     if kind == "knowledge_cards":
         assert "Knowledge Card" in response and "```yaml" in response and "confidence_weighted" in response
-        multi = await engine.search_multi(
+        multi = await engine._query_many(
             dict(collections=["docs"], query="queue", mode="keyword", format="llm")
         )
         assert "Knowledge Card" in multi and "```yaml" in multi and "reciprocal_collection_rank" in multi
@@ -265,7 +265,7 @@ async def test_non_code_search_formats(engine, source_dir, kind):
 @pytest.mark.parametrize("mode", ["semantic", "hybrid"])
 async def test_llm_does_not_repeat_embedding(code, fake, mode):
     before = len(fake.calls)
-    result = await corpus.query(
+    result = await corpus.corpus_query(
         code, corpus.CorpusQuery(query="parse_config", collections=["code"], mode=mode, format="llm")
     )
     assert result.startswith("# Corpus query") and len(fake.calls) == before + 1

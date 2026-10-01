@@ -77,7 +77,7 @@ def test_bulk_keyword_lookup_and_deduplication(count):
 
 
 async def test_connections_reused_with_exclusive_reader_leases(engine):
-    await engine.create_collection(name="pool")
+    await engine.collection_create(name="pool")
     with engine.connection("pool") as first:
         with engine.connection("pool") as second:
             assert first is not second
@@ -98,7 +98,7 @@ async def test_connections_reused_with_exclusive_reader_leases(engine):
 
 
 async def test_new_reader_connection_does_not_block_behind_writer(engine):
-    await engine.create_collection(name="readers")
+    await engine.collection_create(name="readers")
     entered, release = threading.Event(), threading.Event()
 
     def writer():
@@ -113,17 +113,17 @@ async def test_new_reader_connection_does_not_block_behind_writer(engine):
         # Lease the existing cached reader so the next read must open a fresh one.
         with engine.connection("readers"):
             before = time.monotonic()
-            result = engine.get_collection("readers")
+            result = engine.collection_get("readers")
             assert time.monotonic() - before < 1
             assert result["description"] != "pending"
     finally:
         release.set()
         await task
-    assert engine.get_collection("readers")["description"] == "pending"
+    assert engine.collection_get("readers")["description"] == "pending"
 
 
 async def test_bounded_concurrency_and_one_refresh(engine, fake, source_dir, monkeypatch):
-    await engine.create_collection(name="parallel", kind="source_code")
+    await engine.collection_create(name="parallel", kind="source_code")
     engine.config.defaults.max_concurrent_files = 4
     for n in range(12):
         (source_dir / f"source{n}.py").write_text(f"value = {n}\n# shared keyword vocabulary\n")
@@ -153,10 +153,10 @@ async def test_bounded_concurrency_and_one_refresh(engine, fake, source_dir, mon
         refresh(conn)
 
     monkeypatch.setattr(db, "refresh_keywords", counted)
-    job = engine.start_scan("parallel", str(source_dir))
+    job = engine.scan_start("parallel", str(source_dir))
     await asyncio.wait_for(saturated.wait(), 4)
     assert peak == 4
-    assert engine.get_collection("parallel")["counts"]["chunks"] == 0
+    assert engine.collection_get("parallel")["counts"]["chunks"] == 0
     release.set()
     result = await finish(engine, "parallel", job)
     assert result["status"] == "completed" and result["progress"]["completed"] == 12
@@ -172,48 +172,48 @@ async def test_bounded_concurrency_and_one_refresh(engine, fake, source_dir, mon
         raise RuntimeError("fixture frequency refresh failure")
 
     monkeypatch.setattr(db, "refresh_keywords", broken_refresh)
-    failed = await finish(engine, "parallel", engine.start_scan("parallel", str(source_dir)))
+    failed = await finish(engine, "parallel", engine.scan_start("parallel", str(source_dir)))
     assert failed["status"] == "failed"
     assert "Finalization failed" in failed["error_summary"]
     assert not engine.active
 
 
 async def test_scan_does_not_recount_whole_collection_for_every_file(engine, source_dir, monkeypatch):
-    await engine.create_collection(name="metadata", kind="source_code")
+    await engine.collection_create(name="metadata", kind="source_code")
     for n in range(16):
         (source_dir / f"{n}.py").write_text(f"number = {n}\n")
-    original = engine.get_collection
+    original = engine.collection_get
     calls = []
 
     def counted(name):
         calls.append(name)
         return original(name)
 
-    monkeypatch.setattr(engine, "get_collection", counted)
-    job = await finish(engine, "metadata", engine.start_scan("metadata", str(source_dir)))
+    monkeypatch.setattr(engine, "collection_get", counted)
+    job = await finish(engine, "metadata", engine.scan_start("metadata", str(source_dir)))
     assert job["progress"]["completed"] == 16
     assert len(calls) <= 6
 
 
 async def test_immediate_cancel_and_close_do_not_leave_queued_jobs(engine, source_dir):
-    await engine.create_collection(name="cancel-now")
+    await engine.collection_create(name="cancel-now")
     (source_dir / "a.txt").write_text("Some text")
-    job = engine.start_scan("cancel-now", str(source_dir))
-    engine.cancel_job(job["id"])
+    job = engine.scan_start("cancel-now", str(source_dir))
+    engine.scan_job_cancel(job["id"])
     result = await finish(engine, "cancel-now", job)
     assert result["status"] == "cancelled"
     assert not engine.active
-    job = engine.start_scan("cancel-now", str(source_dir))
+    job = engine.scan_start("cancel-now", str(source_dir))
     await engine.close()
     assert not engine.active
-    assert engine.get_job("cancel-now", job["id"])["status"] == "paused"
+    assert engine.scan_job_get("cancel-now", job["id"])["status"] == "paused"
 
 
 async def test_concurrent_duplicate_card_ids_are_atomic(engine, source_dir):
-    await engine.create_collection(name="cards", kind="knowledge_cards")
+    await engine.collection_create(name="cards", kind="knowledge_cards")
     for n in range(4):
         (source_dir / f"{n}.yaml").write_text(yaml.safe_dump(card()))
-    job = await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    job = await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     assert job["progress"]["completed"] == 1 and job["progress"]["failed"] == 3
     with engine.connection("cards") as conn:
         assert conn.execute("SELECT COUNT(*) FROM kc_cards").fetchone()[0] == 1
@@ -266,10 +266,10 @@ time.sleep(60)
 
 async def test_pipeline_debug_messages_without_payloads(engine, source_dir, caplog):
     caplog.set_level(TRACE, logger="ragdbman")
-    await engine.create_collection(name="logs")
+    await engine.collection_create(name="logs")
     path = source_dir / "paper.txt"
     path.write_text("PRIVATE_DOCUMENT_SENTINEL")
-    await engine.add_file("logs", str(path))
+    await engine.collection_add_file("logs", str(path))
     for text in ("Index start", "Extracted", "Chunked", "Keyword batch", "Committed index", "Indexed"):
         assert text in caplog.text
     assert "PRIVATE_DOCUMENT_SENTINEL" not in caplog.text
@@ -374,14 +374,16 @@ def test_serve_sigint_exits_with_open_sse_and_converter_descendant(tmp_path):
                 deadline = time.monotonic() + 8
                 while True:
                     try:
-                        if client.get("/api/collections").status_code == 200:
+                        if client.post("/api/collections-list", json={}).status_code == 200:
                             break
                     except httpx.TransportError:
                         pass
                     assert time.monotonic() < deadline and process.poll() is None, log_path.read_text()
                     time.sleep(0.02)
-                assert client.post("/api/collections", json={"name": "signal"}).status_code == 200
-                job = client.post("/api/collections/signal/scan", json={"root": str(sources)}).json()
+                assert client.post("/api/collection-create", json={**({"name": "signal"})}).status_code == 200
+                job = client.post(
+                    "/api/scan-start", json={**({"root": str(sources)}), "collection": "signal"}
+                ).json()
                 while not child_file.exists():
                     assert time.monotonic() < deadline
                     time.sleep(0.02)

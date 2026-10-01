@@ -7,7 +7,7 @@ import pytest
 from ragdbman.web import create_app
 
 
-@pytest.mark.parametrize("route", ["/graph", "/collections/code/graph"])
+@pytest.mark.parametrize("route", ["/corpus-graph", "/collections/code/corpus-graph"])
 async def test_graph_ui_routes_and_auth(engine, route, monkeypatch):
     monkeypatch.setenv("RAGDBMAN_AUTH_TOKEN", "ui-admin-test")
     monkeypatch.setenv("RAGDBMAN_QUERY_TOKEN", "ui-query-test")
@@ -17,4 +17,4 @@ async def test_graph_ui_routes_and_auth(engine, route, monkeypatch):
         assert denied.status_code == 401
         allowed = await client.get(route, headers={"Authorization": "Bearer ui-admin-test"})
         assert allowed.status_code == 200
-        assert 'href="/graph"' in allowed.text
+        assert 'href="/corpus-graph"' in allowed.text

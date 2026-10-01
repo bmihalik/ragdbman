@@ -3,6 +3,7 @@
 
 
 import asyncio
+import base64
 import threading
 from pathlib import Path
 
@@ -38,7 +39,7 @@ def card(card_id="BFS", confidence=1.0, title="Breadth-first search"):
 
 
 async def create(engine, source_dir, name="cards"):
-    await engine.create_collection(
+    await engine.collection_create(
         CreateCollection(name=name, kind="knowledge_cards", source_roots=[str(source_dir)])
     )
 
@@ -48,7 +49,7 @@ async def test_ingestion_field_vectors_and_non_card_skip(engine, source_dir):
     (source_dir / "settings.yml").write_text("theme: dark\n")
     (source_dir / "ignored.txt").write_text("not yaml")
     await create(engine, source_dir)
-    completed = await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    completed = await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     assert completed["status"] == "completed"
     assert {
         k: completed["progress"][k]
@@ -62,7 +63,7 @@ async def test_ingestion_field_vectors_and_non_card_skip(engine, source_dir):
         "failed": 0,
         "skipped": 1,
     }
-    assert engine.get_collection("cards")["counts"]["cards"] == 1
+    assert engine.collection_get("cards")["counts"]["cards"] == 1
     with engine.connection("cards") as conn:
         fields = [r[0] for r in conn.execute("SELECT field_type FROM kc_embeddings ORDER BY id")]
         assert fields == ["description", "positive", "negative", "code"]
@@ -73,9 +74,9 @@ async def test_malformed_card_is_reported_and_old_card_is_atomic(engine, source_
     path = source_dir / "bfs.yaml"
     path.write_text(yaml.safe_dump(card(), sort_keys=False))
     await create(engine, source_dir)
-    await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     path.write_text("id: BFS\ncategory: Programming\ntitle: [broken\n")
-    failed = await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    failed = await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     assert failed["status"] == "completed_with_errors"
     with engine.connection("cards") as conn:
         assert conn.execute("SELECT title FROM kc_cards").fetchone()[0] == "Breadth-first search"
@@ -86,7 +87,7 @@ async def test_duplicate_ids_are_rejected_without_replacing_first(engine, source
     (source_dir / "one.yaml").write_text(yaml.safe_dump(card(), sort_keys=False))
     (source_dir / "two.yaml").write_text(yaml.safe_dump(card(title="Duplicate"), sort_keys=False))
     await create(engine, source_dir)
-    completed = await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    completed = await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     assert completed["progress"]["completed"] == 1
     assert completed["progress"]["failed"] == 1
     with engine.connection("cards") as conn:
@@ -107,13 +108,13 @@ async def test_rest_card_validation_and_duplicate_are_not_server_errors(engine, 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://localhost"
     ) as client:
-        route = "/api/collections/cards/add_file"
-        response = await client.post(route, json={"path": str(malformed)})
+        route = "/api/collection-add-file"
+        response = await client.post(route, json={"collection": "cards", "path": str(malformed)})
         assert response.status_code == 422
         assert response.json()["code"] == "KNOWLEDGE_CARD_INVALID"
-        response = await client.post(route, json={"path": str(original)})
+        response = await client.post(route, json={"collection": "cards", "path": str(original)})
         assert response.status_code == 200
-        response = await client.post(route, json={"path": str(duplicate)})
+        response = await client.post(route, json={"collection": "cards", "path": str(duplicate)})
         assert response.status_code == 409
         assert response.json()["code"] == "KNOWLEDGE_CARD_DUPLICATE"
     with engine.connection("cards") as conn:
@@ -124,16 +125,16 @@ async def test_confidence_threshold_and_keyword_only_avoids_embedder(engine, fak
     path = source_dir / "low.yaml"
     path.write_text(yaml.safe_dump(card(confidence=0.1), sort_keys=False))
     await create(engine, source_dir)
-    await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     calls = len(fake.calls)
-    results = await engine.search_knowledge_cards(
+    results = await engine._query_cards(
         KnowledgeCardSearchRequest(
             collection="cards", query="queue graph", mode="keyword", minimum_similarity=0.2
         )
     )
     assert results == []
     assert len(fake.calls) == calls
-    results = await engine.search_knowledge_cards(
+    results = await engine._query_cards(
         KnowledgeCardSearchRequest(
             collection="cards", query="queue graph", mode="keyword", minimum_similarity=0
         )
@@ -181,7 +182,7 @@ async def test_exact_vector_formula_and_fallback(engine, source_dir, monkeypatch
     path = source_dir / "card.yml"
     path.write_text(yaml.safe_dump(data))
     await create(engine, source_dir)
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     # q=(1,0); description=(.6,.8), positive=(1,0), negative=(0,1).
     vectors = {"description": [0.6, 0.8], "positive": [1.0, 0.0], "negative": [0.0, 1.0]}
     with engine.connection("cards") as conn:
@@ -196,7 +197,7 @@ async def test_exact_vector_formula_and_fallback(engine, source_dir, monkeypatch
 
     monkeypatch.setattr(engine.embedder, "embed", query_embed)
     for query_type, expected in (("general", 0.48), ("expert", 0.48 if missing else 0.896)):
-        result = await engine.search_knowledge_cards(
+        result = await engine._query_cards(
             collection="cards",
             query="unweighted",
             mode="vector",
@@ -204,7 +205,7 @@ async def test_exact_vector_formula_and_fallback(engine, source_dir, monkeypatch
             minimum_similarity=0,
         )
         assert result[0]["score"] == pytest.approx(expected, abs=1e-6)
-    pruned = await engine.search_knowledge_cards(
+    pruned = await engine._query_cards(
         collection="cards",
         query="unweighted",
         mode="vector",
@@ -220,42 +221,44 @@ async def test_card_replacement_rebuild_prune_and_restart(engine, source_dir, cf
     path = source_dir / "card.yaml"
     path.write_text(yaml.safe_dump(card()))
     await create(engine, source_dir)
-    first = await engine.add_file("cards", str(path))
-    same = await engine.add_file("cards", str(path))
+    first = await engine.collection_add_file("cards", str(path))
+    same = await engine.collection_add_file("cards", str(path))
     assert same["classification"] == "unchanged"
     path.write_text(yaml.safe_dump(card("new-id", title="Replacement")))
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     with engine.connection("cards") as conn:
         assert conn.execute("SELECT id FROM kc_cards").fetchone()[0] == "new-id"
         assert conn.execute("SELECT COUNT(*) FROM kc_fts").fetchone()[0] == 1
         assert conn.execute("SELECT COUNT(*) FROM kc_embeddings").fetchone()[0] == 4
         assert conn.execute("SELECT COUNT(*) FROM source_versions").fetchone()[0] == 2
-    rebuilt = await finish(engine, "cards", engine.rebuild_collection("cards", confirm=True))
+    rebuilt = await finish(engine, "cards", engine.collection_rebuild("cards", confirm=True))
     assert rebuilt["status"] == "completed"
     restored = Engine(cfg, fake)
     try:
-        assert restored.get_collection("cards")["counts"]["cards"] == 1
+        assert restored.collection_get("cards")["counts"]["cards"] == 1
     finally:
         await restored.close()
     # Scan assigns the registered root even to a previously manually added source.
     path.write_text(yaml.safe_dump(card("new-id", title="Root-bound replacement")))
-    await finish(engine, "cards", engine.start_scan("cards", str(source_dir)))
+    await finish(engine, "cards", engine.scan_start("cards", str(source_dir)))
     path.unlink()
-    await finish(engine, "cards", engine.start_scan("cards", str(source_dir), prune_missing=True))
+    await finish(
+        engine, "cards", engine.scan_start("cards", str(source_dir), prune_missing=True, confirm=True)
+    )
     with engine.connection("cards") as conn:
         for table in ("kc_cards", "kc_fts", "kc_embeddings"):
             assert conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
-    engine.remove_source("cards", first["source_id"], confirm=True)
-    assert engine.get_collection("cards")["counts"]["sources"] == 0
+    engine.collection_remove_file("cards", first["source_id"], confirm=True)
+    assert engine.collection_get("cards")["counts"]["sources"] == 0
 
 
 async def test_non_card_replacement_removes_stale_vectors(engine, source_dir):
     path = source_dir / "card.yaml"
     path.write_text(yaml.safe_dump(card()))
     await create(engine, source_dir)
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     path.write_text("unrelated: config\n")
-    result = await engine.add_file("cards", str(path))
+    result = await engine.collection_add_file("cards", str(path))
     assert result["skipped"]
     with engine.connection("cards") as conn:
         assert conn.execute("SELECT COUNT(*) FROM kc_embeddings").fetchone()[0] == 0
@@ -266,59 +269,59 @@ async def test_no_tokenizer_or_sidecars_and_isolated_schemas(engine, source_dir)
     await create(engine, source_dir)
     path = source_dir / "card.yaml"
     path.write_text(yaml.safe_dump(card()))
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     assert not list(source_dir.rglob(".ragdbman"))
-    assert engine.get_collection("cards")["chunking"]["tokenizer_mode"] == "whole_field"
+    assert engine.collection_get("cards")["chunking"]["tokenizer_mode"] == "whole_field"
     engine.config.defaults.allow_approximate_tokenizer = True
-    await engine.create_collection(name="normal")
+    await engine.collection_create(name="normal")
     with engine.connection("normal") as conn:
         assert not conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'kc_%'").fetchall()
     with pytest.raises(RagError, match="not a Knowledge Cards"):
-        await engine.search_knowledge_cards(collection="normal", query="test")
+        await engine._query_cards(collection="normal", query="test")
     with pytest.raises(RagError, match="chunk overrides"):
-        await engine.create_collection(name="bad", kind="knowledge_cards", chunk_size_tokens=20)
+        await engine.collection_create(name="bad", kind="knowledge_cards", chunk_size_tokens=20)
 
 
 async def test_hybrid_fallback_and_literal_fts_query(engine, source_dir, fake):
     path = source_dir / "card.yaml"
     path.write_text(yaml.safe_dump(card()))
     await create(engine, source_dir)
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     fake.failure = True
-    matches = await engine.search_knowledge_cards(collection="cards", query='queue OR "graph": *')
+    matches = await engine._query_cards(collection="cards", query='queue OR "graph": *')
     assert matches[0]["card"]["id"] == "BFS"
     assert matches[0]["vector_score"] is None
     with pytest.raises(RagError, match="test outage"):
-        await engine.search_knowledge_cards(collection="cards", query="graph", mode="vector")
+        await engine._query_cards(collection="cards", query="graph", mode="vector")
 
 
 async def test_rest_mcp_yaml_and_multi_search(engine, source_dir):
     path = source_dir / "card.yaml"
     path.write_text(yaml.safe_dump(card()))
     await create(engine, source_dir)
-    await engine.add_file("cards", str(path))
+    await engine.collection_add_file("cards", str(path))
     app = create_app(engine, False)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://localhost"
     ) as client:
         result = await client.post(
-            "/api/knowledge-cards/search", json={"collection": "cards", "query": "queue", "mode": "keyword"}
+            "/api/corpus-query", json={"collections": ["cards"], "query": "queue", "mode": "keyword"}
         )
         assert result.status_code == 200
         payload = result.json()
-        assert "id" not in yaml.safe_load(payload["yaml"])
-        assert yaml.safe_load(payload["results"][0]["yaml"])["codes"] == card()["codes"]
+        assert "id" not in payload["results"][0]["content"]
+        assert payload["results"][0]["content"]["codes"] == card()["codes"]
         invalid = await client.post(
-            "/api/knowledge-cards/search",
-            json={"collection": "cards", "query": "queue", "minimum_similarity": 2},
+            "/api/corpus-query",
+            json={"collections": ["cards"], "query": "queue", "minimum_score": 2},
         )
         assert invalid.status_code == 422
-        for mode in ("keyword", "hybrid", "vector"):
+        for mode in ("keyword", "hybrid", "semantic"):
             result = await client.post(
-                "/api/search/multi", json={"collections": ["cards"], "query": "queue", "mode": mode}
+                "/api/corpus-query", json={"collections": ["cards"], "query": "queue", "mode": mode}
             )
             assert result.status_code == 200
-            assert result.json()["collections_failed"] == []
+            assert result.json()["warnings"] == []
     blocks = await app.state.mcp.call_tool(
         "corpus_query", {"collections": ["cards"], "query": "queue", "mode": "keyword"}
     )
@@ -351,14 +354,14 @@ async def test_card_parse_does_not_block_overview(engine, source_dir, monkeypatc
         return original(path)
 
     monkeypatch.setattr(kc, "read_card", slow_read)
-    job = engine.start_scan("cards", str(source_dir))
+    job = engine.scan_start("cards", str(source_dir))
     try:
         assert await asyncio.to_thread(entered.wait, 3)
         app = create_app(engine, False)
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://localhost"
         ) as c:
-            result = await asyncio.wait_for(c.get("/api/collections"), 0.5)
+            result = await asyncio.wait_for(c.post("/api/collections-list", json={}), 0.5)
             assert result.status_code == 200
     finally:
         release.set()
@@ -371,13 +374,13 @@ async def test_cancel_before_card_commit(engine, source_dir, fake):
     await create(engine, source_dir)
     fake.entered.clear()
     fake.gate = asyncio.Event()
-    job = engine.start_scan("cards", str(source_dir))
+    job = engine.scan_start("cards", str(source_dir))
     await asyncio.wait_for(fake.entered.wait(), 3)
-    engine.cancel_job(job["id"])
+    engine.scan_job_cancel(job["id"])
     fake.gate.set()
     complete = await finish(engine, "cards", job)
     assert complete["status"] == "cancelled"
-    assert engine.get_collection("cards")["counts"]["cards"] == 0
+    assert engine.collection_get("cards")["counts"]["cards"] == 0
     with engine.connection("cards") as conn:
         assert conn.execute("SELECT COUNT(*) FROM kc_embeddings").fetchone()[0] == 0
 
@@ -393,8 +396,8 @@ async def test_invalid_embeddings_fail_without_partial_card(engine, source_dir, 
 
     monkeypatch.setattr(engine.embedder, "embed", invalid)
     with pytest.raises(RagError, match="finite, nonzero"):
-        await engine.add_file("cards", str(path))
-    assert engine.get_collection("cards")["counts"]["cards"] == 0
+        await engine.collection_add_file("cards", str(path))
+    assert engine.collection_get("cards")["counts"]["cards"] == 0
 
 
 async def test_highest_similarity_low_confidence_pruned_in_all_modes(engine, source_dir, monkeypatch):
@@ -402,7 +405,7 @@ async def test_highest_similarity_low_confidence_pruned_in_all_modes(engine, sou
     for name, confidence in (("high", 1.0), ("low", 0.1)):
         path = source_dir / f"{name}.yaml"
         path.write_text(yaml.safe_dump(card(name, confidence)))
-        await engine.add_file("cards", str(path))
+        await engine.collection_add_file("cards", str(path))
     vector = [1.0] + [0.0] * 7
     with engine.connection("cards") as conn:
         conn.execute("UPDATE kc_embeddings SET embedding=?", (sqlite_vec.serialize_float32(vector),))
@@ -412,11 +415,11 @@ async def test_highest_similarity_low_confidence_pruned_in_all_modes(engine, sou
 
     monkeypatch.setattr(engine.embedder, "embed", embed)
     for mode in ("keyword", "vector", "hybrid"):
-        matches = await engine.search_knowledge_cards(
+        matches = await engine._query_cards(
             collection="cards", query="queue", mode=mode, minimum_similarity=0.65
         )
         assert [m["card"]["id"] for m in matches] == ["high"]
-    result = await engine.search_knowledge_cards(collection="cards", query="queue", minimum_similarity=0)
+    result = await engine._query_cards(collection="cards", query="queue", minimum_similarity=0)
     assert result[0]["rank_score"] == pytest.approx(2 / (engine.config.search.rrf_k + 1))
     assert result[1]["rank_score"] == pytest.approx(2 / (engine.config.search.rrf_k + 2))
 
@@ -442,8 +445,12 @@ async def test_managed_upload_and_structured_filter_rejection(engine, source_dir
     app = create_app(engine, False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c:
         response = await c.post(
-            "/api/collections/cards/upload",
-            files={"file": ("upload.yaml", yaml.safe_dump(card()), "application/yaml")},
+            "/api/collection-upload-file",
+            json={
+                "collection": "cards",
+                "filename": "upload.yaml",
+                "content_base64": base64.b64encode(yaml.safe_dump(card()).encode()).decode(),
+            },
         )
         assert response.status_code == 200, response.text
         source_id = response.json()["source_id"]
@@ -451,10 +458,14 @@ async def test_managed_upload_and_structured_filter_rejection(engine, source_dir
             {"mode": "structured"},
             {"mode": "keyword", "filters": {"source_ids": [source_id]}},
         ):
-            response = await c.post("/api/search", json={"collection": "cards", "query": "queue", **request})
-            assert response.status_code == 400
-        engine.remove_source("cards", source_id, confirm=True, delete_original_managed_file=True)
-        assert not list(Path(engine.get_collection("cards")["managed_root"]).glob("*.yaml"))
+            response = await c.post(
+                "/api/corpus-query", json={"collections": ["cards"], "query": "queue", **request}
+            )
+            assert response.status_code == 200
+            assert response.json()["collections_searched"] == []
+            assert response.json()["warnings"][0]["code"] == "CONFIG_INVALID"
+        engine.collection_remove_file("cards", source_id, confirm=True, delete_original_managed_file=True)
+        assert not list(Path(engine.collection_get("cards")["managed_root"]).glob("*.yaml"))
 
 
 @pytest.mark.parametrize("value", [0, -1, 1.5, True])

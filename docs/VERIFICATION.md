@@ -4,6 +4,52 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.6.0
+
+Canonical-interface implementation and release packaging were checked on Linux
+on 1 October 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 614 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 614 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 616 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 614 passed, 2 optional tests skipped |
+
+Full suites ran serially, with installed-wheel runs outside the source checkout.
+The catalog has 28 service operations, available in CLI/REST/Python and on
+the optional admin MCP endpoint. Query MCP retains exactly three read-only
+corpus operations. Tests compare registered REST operation IDs, MCP tool fields,
+Python methods and CLI contracts against the shared catalog.
+
+Cross-interface tests verify raw corpus query/graph parity, flat MCP arguments,
+strict unknown-field rejection, per-operation boolean annotations, query scope,
+confirmation checks, and removal of old tool/route/CLI aliases. Existing tests
+were ported to the canonical names; lower-level retrieval tests continue to
+exercise internal implementations without exposing competing public query APIs.
+The 60 CLI cases retain real foreground/daemon subprocess, ownership, signal,
+watch/cancel/resume, upload/collection and query workflows.
+
+Both Chromium regressions passed after the browser requests were converted to
+canonical POST endpoints. They cover source/card/multiple-collection queries,
+raw/LLM formats, graph controls and selection, errors, escaping, clipboard
+fallback, mobile width, and stable job inspection.
+A separate disposable live server was checked through visible controls for
+collection creation, base64 upload/indexing, root registration/scanning,
+manifest inspection, raw/LLM retrieval and source graph traversal. Desktop
+and mobile/light-dark views were inspected without page errors or horizontal
+overflow. These checks use deterministic embedding fixtures, not real models.
+
+Ruff, formatting, first-party Apache-2.0 headers, JavaScript syntax, lockfile
+consistency and wheel/sdist builds pass. The generated `docs/INTERFACES.md`
+matches the operation catalog and is checked by the test suite.
+The full SDK teardown/discovery tests remain part of every run.
+
+Real Hermes/client acceptance, real Ollama retrieval quality, MinerU 3.4.5 and
+other converter deployments remain separate acceptance work. Existing indexes
+need no rebuild for this release. Earlier records below describe their actual
+historical releases, not the current supported interface vocabulary.
+
 ## Version 0.5.4
 
 Repository consistency, expanded CLI help and release packaging were checked

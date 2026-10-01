@@ -3,7 +3,7 @@
 Knowledge Cards are curated YAML records, distinct from raw document chunks.
 Create a collection with `kind="knowledge_cards"` in REST, MCP or the web interface,
 register an allowed source root, and start a scan. Only `.yaml` and `.yml` files
-are discovered; managed YAML uploads and `add_file` also work.
+are discovered; managed YAML uploads and `collection_add_file` also work.
 
 ## Card structure
 
@@ -90,25 +90,19 @@ fail startup with `CONFIG_INVALID`; restart the daemon after changing defaults.
 | `RAGDBMAN_KC_ALPHA_NEGATIVE` | `0.30` | Finite number 0 to 1 |
 | `RAGDBMAN_KC_BETA_DESCRIPTION` | `0.20` | Finite number 0 to 1 |
 
-The specialized administrative REST search accepts `collection`, `query`,
-`query_type` (`general` or default `expert`), `mode` (`vector`, `keyword` or default
-`hybrid`), optional `top_k`, and optional `minimum_similarity`.
-An explicit threshold of `0` is honored, not replaced with the default.
-
-POST this object to `/api/knowledge-cards/search` for a JSON response with
-ranked `results` and combined ID-free `yaml`. Each result includes the full card,
-source provenance, `score`, `rank_score`, surviving channel scores and its own
-ID-free `yaml`. JSON is an administrative inspection surface and retains IDs;
-the operational MCP card payload and YAML fields do not.
+All public card retrieval uses `corpus_query` with the same fields in Python,
+MCP, CLI and REST. POST this object to `/api/corpus-query`. Raw results include
+the ID-free card in `content`, relevance/score policy and provenance. LLM
+formatting renders complete fenced YAML. An explicit cutoff of 0 is honored.
 
 ```json
 {
-  "collection": "principles",
+  "collections": ["principles"],
   "query": "unweighted shortest paths",
-  "query_type": "expert",
+  "perspective": "expert",
   "mode": "hybrid",
-  "top_k": 3,
-  "minimum_similarity": 0.65
+  "limit": 3,
+  "minimum_score": 0.65
 }
 ```
 
@@ -116,12 +110,11 @@ MCP uses only `corpus_query`, with `collections`, `query`, `mode`
 (`keyword`, `semantic`, `hybrid`), `perspective` (`general`, `expert`), `limit`
 and `minimum_score`. Its default perspective is general, its global default
 limit is 5, and its card cutoff uses `RAGDBMAN_KC_MIN_SIMILARITY` unless explicitly
-overridden. `RAGDBMAN_KC_DEFAULT_TOP_K` applies to specialized card REST/engine
-calls, not the unified tool's global limit. See [MCP.md](MCP.md) for the complete
+overridden. `RAGDBMAN_KC_DEFAULT_TOP_K` is retained for internal retrieval helpers,
+not public corpus requests, whose global default is 5. See [MCP.md](MCP.md) for the complete
 contract and profile setup.
 
-The administrative document search REST routes also accept cards with expert
-weighting. Structured mode and nonempty document filters are rejected for cards;
+Structured mode and nonempty document filters are rejected for cards;
 cross-collection queries report that failure while returning successful results.
 
 ## Scoring definitions
@@ -168,15 +161,9 @@ string indentation/newlines survive a YAML load/dump roundtrip. YAML comments,
 key quoting and original formatting are not reproduced byte-for-byte; raw
 source YAML remains in the database for inspection.
 
-The specialized REST YAML field uses the following message when no card survives:
-
-```text
-No Knowledge Cards met the required relevance and confidence thresholds.
-```
-
-The unified MCP response instead contains an empty `results` list plus any
-warnings and a readable no-results explanation. It always keeps its envelope
-consistent, including when searching a mixture of collection types.
+Raw corpus responses contain an empty `results` list plus any warnings when
+no card survives. LLM output gives a readable no-results explanation.
+The envelope is consistent across collection kinds and transports.
 
 ## Testing and licensing boundary
 

@@ -11,46 +11,19 @@ import hmac
 import ipaddress
 import json
 import os
-import re
 from contextlib import AsyncExitStack, asynccontextmanager
 from importlib.resources import files
-from pathlib import Path
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI
 from fastapi import Request as HTTPRequest
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 
-from . import __version__, corpus, db
+from . import __version__
 from .engine import Engine
 from .errors import RagError
-from .graph.query import GraphRequest
 from .mcp_server import create_mcp
-from .models import CreateCollection, KnowledgeCardSearchRequest, MultiSearchRequest, Request, SearchRequest
-
-
-class RootBody(Request):
-    path: str
-    recursive: bool = True
-
-
-class ScanBody(Request):
-    root: str
-    recursive: bool = True
-    prune_missing: bool = False
-
-
-class FileBody(Request):
-    path: str
-
-
-class ConfirmBody(Request):
-    confirm: bool = False
-
-
-class UpdateBody(Request):
-    description: str | None = None
-    rebuild: bool = False
+from .operations import OPERATIONS, invoke
 
 
 class SecurityMiddleware:
@@ -65,7 +38,9 @@ class SecurityMiddleware:
             return await self.app(scope, receive, send)
         headers = {k.decode().lower(): v.decode() for k, v in scope["headers"]}
         server = self.engine.config.server
-        if self.engine.shutting_down and scope["method"] not in {"GET", "HEAD"}:
+        operation_name = scope["path"].removeprefix("/api/").replace("-", "_")
+        readonly_operation = operation_name in OPERATIONS and OPERATIONS[operation_name].readonly
+        if self.engine.shutting_down and scope["method"] not in {"GET", "HEAD"} and not readonly_operation:
             return await JSONResponse({"code": "SERVER_SHUTTING_DOWN", "message": "Daemon is stopping"}, 503)(
                 scope, receive, send
             )
@@ -130,7 +105,7 @@ class SecurityMiddleware:
                 )
                 return await response(scope, receive, send)
         maximum = self.engine.config.defaults.max_file_size_mb * 1024 * 1024 + 1024 * 1024
-        if admin_route:
+        if admin_route or path == "/api/collection-upload-file":
             # Base64 transport overhead; decoded upload limits are checked separately.
             maximum = (
                 4 * ((self.engine.config.defaults.max_file_size_mb * 1024 * 1024 + 2) // 3) + 1024 * 1024
@@ -193,173 +168,32 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
     async def rag_error(request, exc):
         return JSONResponse(exc.as_dict(), exc.status_code)
 
-    @app.get("/api/health")
-    async def health():
-        return await engine.health_status()
+    def register_operation(name, spec):
+        async def endpoint(body):
+            result = await invoke(engine, name, body.model_dump(), admin=True)
+            return PlainTextResponse(result) if isinstance(result, str) else result
 
-    @app.get("/api/collections")
-    async def list_collections():
-        return engine.list_collections()
+        endpoint.__name__ = name
+        endpoint.__annotations__ = {"body": spec.model}
+        app.add_api_route(
+            "/api/" + name.replace("_", "-"),
+            endpoint,
+            methods=["POST"],
+            operation_id=name,
+            name=name,
+            description=spec.description,
+        )
 
-    @app.post("/api/collections")
-    async def create_collection(body: CreateCollection):
-        return await engine.create_collection(body)
-
-    @app.get("/api/collections/{name}")
-    async def get_collection(name: str):
-        return engine.get_collection(name)
-
-    @app.patch("/api/collections/{name}")
-    async def update_collection(name: str, body: UpdateBody):
-        return engine.update_collection_config(name, **body.model_dump())
-
-    @app.delete("/api/collections/{name}")
-    async def delete_collection(name: str, confirm: bool = False, delete_files: bool = False):
-        return engine.delete_collection(name, confirm, delete_files)
-
-    @app.get("/api/collections/{name}/roots")
-    async def list_roots(name: str):
-        return engine.list_source_roots(name)
-
-    @app.post("/api/collections/{name}/roots")
-    async def add_root(name: str, body: RootBody):
-        return engine.add_source_root(name, **body.model_dump())
-
-    @app.delete("/api/collections/{name}/roots/{root_id}")
-    async def remove_root(name: str, root_id: str):
-        return engine.remove_source_root(name, root_id)
-
-    @app.post("/api/collections/{name}/scan")
-    async def scan(name: str, body: ScanBody):
-        return engine.start_scan(name, **body.model_dump())
-
-    @app.get("/api/collections/{name}/jobs")
-    async def jobs(name: str, status: str | None = None, limit: int = 50):
-        return engine.list_jobs(name, status, limit)
-
-    @app.get("/api/collections/{name}/jobs/{job_id}")
-    async def job(name: str, job_id: str):
-        return engine.get_job(name, job_id)
-
-    @app.post("/api/jobs/{job_id}/cancel")
-    async def cancel(job_id: str):
-        return engine.cancel_job(job_id)
-
-    @app.post("/api/collections/{name}/jobs/{job_id}/resume")
-    async def resume(name: str, job_id: str):
-        return engine.resume_job(name, job_id)
-
-    @app.get("/api/collections/{name}/sources")
-    async def sources(
-        name: str,
-        extension: str | None = None,
-        path_prefix: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-        status: str | None = None,
-    ):
-        return engine.list_sources(name, extension, path_prefix, limit, offset, status)
-
-    @app.get("/api/collections/{name}/sources/{source_id}")
-    async def source(name: str, source_id: str):
-        return engine.get_source(name, source_id)
-
-    @app.delete("/api/collections/{name}/sources/{source_id}")
-    async def remove_source(
-        name: str, source_id: str, confirm: bool = False, delete_original_managed_file: bool = False
-    ):
-        return engine.remove_source(name, source_id, confirm, delete_original_managed_file)
-
-    @app.post("/api/collections/{name}/add_file")
-    async def add_file(name: str, body: FileBody):
-        return await engine.add_file(name, body.path)
-
-    @app.post("/api/collections/{name}/upload")
-    async def upload(name: str, file: UploadFile):
-        meta = engine.get_collection(name)
-        filename = Path((file.filename or "upload").replace("\\", "/")).name
-        filename = re.sub(r"[\x00-\x1f]", "_", filename)
-        if filename in {"", ".", ".."}:
-            raise RagError("CONFIG_INVALID", "Invalid upload filename")
-        target = Path(meta["managed_root"]) / f"{db.uid()}-{filename}"
-        maximum = engine.config.defaults.max_file_size_mb * 1024 * 1024
-        size = 0
-        try:
-            with target.open("xb") as stream:
-                while data := await file.read(1024 * 1024):
-                    size += len(data)
-                    if size > maximum:
-                        raise RagError("FILE_TOO_LARGE", "Upload exceeds max_file_size_mb")
-                    stream.write(data)
-        except BaseException:
-            target.unlink(missing_ok=True)
-            raise
-        finally:
-            await file.close()
-        result = await engine.add_file(name, str(target), origin="upload")
-        return {**result, "path": str(target)}
-
-    @app.get("/api/collections/{name}/keywords")
-    async def keywords(name: str, query: str | None = None, limit: int = 50, offset: int = 0):
-        return engine.list_keywords(name, query, limit, offset)
-
-    @app.get("/api/collections/{name}/metadata_fields")
-    async def fields(name: str):
-        return {"fields": engine.list_metadata_fields(name)}
-
-    @app.post("/api/collections/{name}/rebuild")
-    async def rebuild(name: str, body: ConfirmBody):
-        return engine.rebuild_collection(name, body.confirm)
-
-    @app.post("/api/collections/{name}/vacuum")
-    async def vacuum(name: str):
-        return engine.vacuum_collection(name)
-
-    @app.get("/api/collections/{name}/manifest")
-    async def manifest(name: str):
-        return engine.export_collection_manifest(name)
-
-    @app.post("/api/search")
-    async def single_search(body: SearchRequest):
-        result = await engine.search(body)
-        return PlainTextResponse(result) if isinstance(result, str) else result
-
-    @app.get("/api/corpus")
-    async def corpus_catalog():
-        return corpus.describe(engine, admin=True)
-
-    @app.post("/api/corpus/query")
-    async def corpus_search(body: corpus.CorpusQuery):
-        result = await corpus.query(engine, body, admin=True)
-        return PlainTextResponse(result) if isinstance(result, str) else result
-
-    @app.post("/api/search/multi")
-    async def multi_search(body: MultiSearchRequest):
-        result = await engine.search_multi(body)
-        return PlainTextResponse(result) if isinstance(result, str) else result
-
-    @app.post("/api/corpus/graph")
-    async def corpus_graph(body: GraphRequest):
-        result = await engine.graph(body)
-        return PlainTextResponse(result) if isinstance(result, str) else result
-
-    @app.post("/api/knowledge-cards/search")
-    async def knowledge_card_search(body: KnowledgeCardSearchRequest):
-        from .knowledge_cards import dump_cards
-
-        results = await engine.search_knowledge_cards(body)
-        return {
-            "results": [{**match, "yaml": dump_cards([match["card"]])} for match in results],
-            "yaml": dump_cards([match["card"] for match in results]),
-        }
+    for name, spec in OPERATIONS.items():
+        register_operation(name, spec)
 
     @app.get("/collections/{name}/jobs/{job_id}/events")
     async def job_events(name: str, job_id: str, request: HTTPRequest):
-        engine.get_job(name, job_id)
+        engine.scan_job_get(name, job_id)
 
         async def stream():
             while not engine.shutting_down and not await request.is_disconnected():
-                item = engine.get_job(name, job_id)
+                item = engine.scan_job_get(name, job_id)
                 yield f"event: progress\ndata: {json.dumps(item)}\n\n"
                 if item["status"] not in {"running", "queued"}:
                     break
@@ -390,10 +224,10 @@ def create_app(engine: Engine, manage_engine: bool = True) -> FastAPI:
         "/collections/{name}/upload",
         "/collections/{name}/sources",
         "/collections/{name}/jobs/{job_id}",
-        "/collections/{name}/search",
-        "/collections/{name}/graph",
-        "/graph",
-        "/search-multi",
+        "/collections/{name}/corpus-query",
+        "/collections/{name}/corpus-graph",
+        "/corpus-graph",
+        "/corpus-query",
     ):
         app.add_api_route(path, ui, methods=["GET"], include_in_schema=False)
     # Both exact transport routes share the parent's auth middleware and lifespan.

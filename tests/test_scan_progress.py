@@ -77,12 +77,12 @@ def test_missing_total_and_timing_are_safe():
 
 async def test_total_visible_while_first_file_is_still_embedding(engine, fake, source_dir):
     engine.config.defaults.max_concurrent_files = 1  # Deliberately isolate the first-file case.
-    await engine.create_collection(name="progress")
+    await engine.collection_create(name="progress")
     for name in ("a.txt", "b.txt", "c.bin"):
         (source_dir / name).write_text("Indexing progress is visible.")
     fake.entered.clear()
     fake.gate = asyncio.Event()
-    started = engine.start_scan("progress", str(source_dir))
+    started = engine.scan_start("progress", str(source_dir))
     assert started["progress"]["total"] is None
     await asyncio.wait_for(fake.entered.wait(), 3)
     try:
@@ -90,7 +90,9 @@ async def test_total_visible_while_first_file_is_still_embedding(engine, fake, s
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://localhost"
         ) as c:
-            response = await asyncio.wait_for(c.get(f"/api/collections/progress/jobs/{started['id']}"), 1)
+            response = await asyncio.wait_for(
+                c.post("/api/scan-job-get", json={"collection": "progress", "job_id": started["id"]}), 1
+            )
         result = response.json()
         assert result["progress"]["total"] == result["progress"]["discovered"] == 3
         assert result["progress"]["processed"] == 0
@@ -107,37 +109,37 @@ async def test_total_visible_while_first_file_is_still_embedding(engine, fake, s
     assert final["progress"]["phase"] == "finished"
     assert final["timing"]["estimated_remaining_seconds"] == 0
     # The completed record must not keep accumulating elapsed wall time.
-    assert engine.get_job("progress", started["id"])["timing"] == final["timing"]
-    again = await finish(engine, "progress", engine.start_scan("progress", str(source_dir)))
+    assert engine.scan_job_get("progress", started["id"])["timing"] == final["timing"]
+    again = await finish(engine, "progress", engine.scan_start("progress", str(source_dir)))
     assert again["progress"]["unchanged"] == 2
     assert again["progress"]["processed"] == again["progress"]["total"] == 3
 
 
 async def test_empty_scan_and_rebuild_totals(engine, source_dir):
-    await engine.create_collection(name="empty")
-    empty = await finish(engine, "empty", engine.start_scan("empty", str(source_dir)))
+    await engine.collection_create(name="empty")
+    empty = await finish(engine, "empty", engine.scan_start("empty", str(source_dir)))
     assert empty["progress"]["total"] == 0 and empty["progress"]["percent"] == 100
     (source_dir / "one.txt").write_text("One tracked source.")
-    await engine.add_file("empty", str(source_dir / "one.txt"))
-    rebuild = await finish(engine, "empty", engine.rebuild_collection("empty", confirm=True))
+    await engine.collection_add_file("empty", str(source_dir / "one.txt"))
+    rebuild = await finish(engine, "empty", engine.collection_rebuild("empty", confirm=True))
     assert rebuild["progress"]["total"] == rebuild["progress"]["processed"] == 1
 
 
 async def test_cancel_and_resume_reset_attempt_statistics(engine, fake, source_dir):
-    await engine.create_collection(name="cancel")
+    await engine.collection_create(name="cancel")
     for n in range(3):
         (source_dir / f"{n}.txt").write_text(f"Source {n}")
     fake.entered.clear()
     fake.gate = asyncio.Event()
-    started = engine.start_scan("cancel", str(source_dir))
+    started = engine.scan_start("cancel", str(source_dir))
     await asyncio.wait_for(fake.entered.wait(), 3)
-    engine.cancel_job(started["id"])
+    engine.scan_job_cancel(started["id"])
     fake.gate.set()
     cancelled = await finish(engine, "cancel", started)
     assert cancelled["progress"]["total"] == 3
     assert cancelled["progress"]["percent"] < 100
     assert cancelled["timing"]["estimated_remaining_seconds"] is None
-    resumed = engine.resume_job("cancel", started["id"])
+    resumed = engine.scan_job_resume("cancel", started["id"])
     assert resumed["progress"]["total"] is None
     assert resumed["timing"]["elapsed_seconds"] == 0
     final = await finish(engine, "cancel", resumed)
@@ -147,7 +149,7 @@ async def test_cancel_and_resume_reset_attempt_statistics(engine, fake, source_d
 
 
 async def test_recovery_does_not_count_daemon_downtime(engine):
-    await engine.create_collection(name="recover")
+    await engine.collection_create(name="recover")
     identifier = db.uid()
     old = (NOW - timedelta(days=2)).isoformat()
     last = (NOW - timedelta(days=2, seconds=-20)).isoformat()
@@ -157,7 +159,7 @@ async def test_recovery_does_not_count_daemon_downtime(engine):
             "jobs",
             dict(
                 id=identifier,
-                collection_id=engine.get_collection("recover")["id"],
+                collection_id=engine.collection_get("recover")["id"],
                 kind="scan",
                 status="running",
                 params_json="{}",
@@ -168,6 +170,6 @@ async def test_recovery_does_not_count_daemon_downtime(engine):
             ),
         )
     engine.recover()
-    result = engine.get_job("recover", identifier)
+    result = engine.scan_job_get("recover", identifier)
     assert result["status"] == "paused"
     assert result["timing"]["elapsed_seconds"] == 20

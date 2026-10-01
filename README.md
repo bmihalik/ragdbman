@@ -2,12 +2,13 @@
 
 An inspectable, local document intelligence system, implemented in Python. Organize named collections, follow indexing jobs, inspect Markdown sidecars and SQLite records, and retrieve source-backed evidence through MCP, REST, or the administrative UI.
 
-Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: three operational tools, with three additional administrative tools available separately.
+Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing through one canonical operation vocabulary. Query MCP has three read-only corpus tools; the separately enabled admin profile exposes the full 28-operation catalog.
 
-Version 0.5.4 expands `ragdbman --help` and every `COMMAND --help` page with
-purpose, behavior, defaults, safety notes and examples. It also adds automated
-source/documentation consistency checks and preserves diagnostics in empty CLI
-tables. See the [CLI reference](docs/CLI.md).
+Version 0.6.0 aligns CLI, MCP, Python and REST names without compatibility aliases.
+Use `corpus-query`, `corpus-graph` and `corpus-describe` in the CLI; use the same
+names with underscores in Python/MCP and `POST /api/<hyphenated-name>` in REST.
+All use the same flat fields. See the generated [interface reference](docs/INTERFACES.md)
+and explanatory [CLI help](docs/CLI.md). Existing indexes do not need rebuilding.
 
 Version 0.5.3 tightens the MCP dependency to `>=1.30.0,<2` and stops advertising
 unused prompt/resource capabilities on both MCP profiles. The three operational
@@ -16,7 +17,7 @@ The annotation follow-up explicitly declares `readOnlyHint`, `destructiveHint`,
 `idempotentHint` and `openWorldHint` on every query and administrative tool;
 their values and scope are documented in [MCP setup](docs/MCP.md).
 
-After replacing the source, stop the old daemon, run `uv sync --locked`, then
+Stop the old daemon before replacing the source, run `uv sync --locked`, then
 start with `uv run --locked ragdbman serve`. Preserve any optional extras in both
 commands (for example, `--extra pymupdf`). Reload or reconnect your MCP client
 so it discovers the current capabilities; Hermes users can use `/reload-mcp`
@@ -125,18 +126,18 @@ Exact tokenization is the default requirement for document and source-code colle
 
 ## Command line and Python API
 
-Version 0.5.2 adds the requested collection, source, indexing, job, search and
-maintenance commands, plus graph and Knowledge Card queries. JSON is the
-default output; `--format table` is available for human inspection, and
-search/graph commands also support `--format llm`.
+The canonical CLI covers collection, file, scan and maintenance operations.
+All retrieval uses corpus-query, including Knowledge Cards and multiple
+collections. `--format raw` returns JSON, `table` is compact local output,
+and corpus query/graph also support `llm`.
 
 ```sh
-uv run ragdbman create-collection --name code --kind source_code \
+uv run ragdbman collection-create --name code --kind source_code \
   --source-roots /home/you/Projects/app
-uv run ragdbman start-scan --collection code --root /home/you/Projects/app
-uv run ragdbman search --collection code --query "configuration loading" \
+uv run ragdbman scan-start --collection code --root /home/you/Projects/app
+uv run ragdbman corpus-query --collections code --query "configuration loading" \
   --mode keyword --format llm
-uv run ragdbman graph --collection code --action callers --symbol parse_config
+uv run ragdbman corpus-graph --collection code --action callers --symbol parse_config
 ```
 
 Direct scans/rebuilds/resumes stay in the foreground until stopped, then close
@@ -144,8 +145,8 @@ the engine cleanly. When `serve` owns the data, use an explicit daemon URL
 instead of starting a competing engine:
 
 ```sh
-uv run ragdbman list-collections --server-url http://127.0.0.1:8765
-uv run ragdbman get-job --collection code --job-id JOB_ID --watch \
+uv run ragdbman collections-list --server-url http://127.0.0.1:8765
+uv run ragdbman scan-job-get --collection code --job-id JOB_ID --watch \
   --server-url http://127.0.0.1:8765
 ```
 
@@ -213,17 +214,17 @@ See [PDF backends](docs/PDF_BACKENDS.md) and [licensing](docs/LICENSING.md) for 
 - **Independent collections:** index the same repository in both collection kinds when you want different retrieval strategies. Settings and indexes are independent.
 
 ```bash
-curl -X POST http://127.0.0.1:8765/api/collections \
+curl -X POST http://127.0.0.1:8765/api/collection-create \
   -H 'Content-Type: application/json' \
   -d '{"name":"code","kind":"source_code","source_roots":["/home/you/Projects"]}'
 
-curl -X POST http://127.0.0.1:8765/api/collections/code/scan \
+curl -X POST http://127.0.0.1:8765/api/scan-start \
   -H 'Content-Type: application/json' \
-  -d '{"root":"/home/you/Projects","recursive":true}'
+  -d '{"collection":"code","root":"/home/you/Projects","recursive":true}'
 
-curl -X POST http://127.0.0.1:8765/api/search \
+curl -X POST http://127.0.0.1:8765/api/corpus-query \
   -H 'Content-Type: application/json' \
-  -d '{"collection":"code","query":"document retrieval","mode":"hybrid"}'
+  -d '{"collections":["code"],"query":"document retrieval","mode":"hybrid"}'
 ```
 
 Existing sidecar directories are not deleted when a source is indexed into a source-code collection. They are excluded from scanning, including when hidden-file indexing is enabled.
@@ -235,10 +236,12 @@ Existing sidecar directories are not deleted when a source is indexed into a sou
 - **Extraction:** text, CSV/TSV, Markdown, HTML, PDF, OOXML, ODF, EPUB, best-effort MOBI/AZW/AZW3, source code, and opt-in external OCR, legacy Office, and transcription.
 - **Chunking:** exact Hugging Face tokenizers or explicitly approximate counts, sentence/token windows, heading and section boundaries, atomic blocks, code-line boundaries, overlap, and duplicate suppression.
 - **Retrieval:** keyword/BM25, vector distance, hybrid rank fusion, structured filters, multi-collection rank fusion, source citations, numeric/date facts, and keyword vocabulary.
-- **Interfaces:** `corpus_describe` and `corpus_query` for agents; optional `corpus_manage`, `corpus_ingest`, and `corpus_job` for administrators. REST/OpenAPI, managed uploads, maintenance controls, and live SSE job progress remain available.
+- **Interfaces:** `corpus_describe`, `corpus_query` and `corpus_graph` for query agents; explicit named collection/file/scan operations for administrators. REST/OpenAPI, managed uploads, maintenance controls, and live SSE job progress remain available.
 - **Knowledge Cards:** structured YAML collections, separate field vectors, confidence-weighted retrieval, and complete ID-free YAML within the unified `corpus_query` response. See the [Knowledge Cards guide](docs/KNOWLEDGE_CARDS.md).
 
 ## Documentation
+
+- [Canonical interface names, fields and hints](docs/INTERFACES.md)
 
 - [Features and limitations](FEATURES.md)
 - [Configuration reference](docs/CONFIGURATION.md)
@@ -302,7 +305,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.4) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.6.0) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).
@@ -359,3 +362,8 @@ ragdbman is licensed under [Apache License 2.0](LICENSE).
 Copyright 2026 Bela Istvan MIHALIK. See [NOTICE](NOTICE) and
 [dependency licensing](docs/LICENSING.md); the project license does not relicense
 third-party packages, external converters or model weights.
+
+## Badges
+
+[![M8ven Score](https://m8ven.ai/badge/mcp/bmihalik/ragdbman)](https://m8ven.ai/mcp/bmihalik/ragdbman)
+

@@ -26,10 +26,10 @@ export async function checkSearchGraph() {
     ];
     const entity = { entity_id: "entity-1", name: "parse_config", qualified_name: "parse_config", kind: "function",
       provenance: { source_path: "src/config.py", line_start: 3, line_end: 8 }};
-    const raw = { results: [{ collection_id: "c", source_id: "s", chunk_id: "chunk",
-      citation_label: "src/config.py:3-8", text: "<img src=x onerror='window.pwned=1'>",
-      score: .5, vector_score: null, keyword_score: .5, graph_context: { available: true } }],
-      applied_filters: [], skipped_filters: [] };
+    const raw = { results: [{ rank:1,collection:"code",kind:"source_code",title:"src/config.py:3-8",
+      content:"<img src=x onerror='window.pwned=1'>",relevance:{score:.5,policy:"bm25_strength"},
+      provenance:{},graph_context:{available:true,entities:[{provenance:{source_id:"s"}}]}}],
+      collections_searched:["code"],warnings:[],effective_options:{} };
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { throw Error("denied"); } } });
     });
@@ -39,7 +39,7 @@ export async function checkSearchGraph() {
         const file=path.split("/").pop();
         return route.fulfill({ body: await readFile(new URL(file,root)), contentType: file.endsWith(".js")?"text/javascript":"text/css" });
       }
-      if(path==="/api/collections"){
+      if(path==="/api/collections-list"){
         const items=structuredClone(cols);items[0].graph.enabled=!disabled;
         return route.fulfill({ json:noCode?items.slice(1):items });
       }
@@ -47,11 +47,13 @@ export async function checkSearchGraph() {
         const body=route.request().postDataJSON();requests.push({path,body});
         if(failure){const f=failure;failure=null;return route.fulfill({status:503,contentType:f==="plain"?"text/plain":"application/json",body:f==="plain"?"Service unavailable":JSON.stringify({message:"Query failed"})});}
         if(body.format==="llm")return route.fulfill({contentType:"text/plain; charset=utf-8",body:"# Result 1\nFile: src/config.py\nCalls: read_file()\n<img src=x onerror='window.pwned=1'>"});
-        if(path==="/api/corpus/graph")return route.fulfill({json:{collection:"code",action:body.action,status:graphStatus,
+        if(path==="/api/corpus-graph")return route.fulfill({json:{collection:"code",action:body.action,status:graphStatus,
           limitation:"Best-effort static analysis.",truncated:true,candidates:[entity],
           entities:[entity],relationships:[{from_name:"parse_config",kind:"calls",target_name:"read_file",
             resolution:"unresolved",provenance:entity.provenance}],chains:[]}});
-        if(path==="/api/knowledge-cards/search")return route.fulfill({json:{results:[{card:{title:"Queue card",confidence:1},score:1,yaml:"title: Queue card\ncodes: |\n  print('queue')\n"}],yaml:"title: Queue card"}});
+        if(path==="/api/corpus-query"&&body.collections[0]==="cards")return route.fulfill({json:{results:[{
+          rank:1,collection:"cards",kind:"knowledge_card",title:"Queue card",content:{title:"Queue card",confidence:1,codes:["print('queue')"]},
+          relevance:{score:1,policy:"confidence_weighted"},provenance:{}}],warnings:[],collections_searched:["cards"]}});
         return route.fulfill({json:raw});
       }
       return route.fulfill({body:await readFile(new URL("index.html",root)),contentType:"text/html"});
@@ -59,7 +61,7 @@ export async function checkSearchGraph() {
     const go=async path=>{await page.goto("http://ragdbman.test"+path);await page.locator("h1").waitFor();};
     const choose=async(name,value)=>page.locator(`[name="${name}"]`).selectOption(value);
     const search=async()=>{await page.getByTestId("button-search").click();await page.waitForFunction(()=>!document.querySelector("#search").dataset.busy);};
-    await go("/collections/code/search");
+    await go("/collections/code/corpus-query");
     await page.getByTestId("input-query").fill("parse_config");
     await choose("mode","keyword");await search();
     assert.equal(requests.at(-1).body.format,"raw");
@@ -68,7 +70,7 @@ export async function checkSearchGraph() {
     await page.getByRole("link",{name:"Explore source graph"}).click();
     await page.getByTestId("button-graph-query").waitFor();
     assert.equal(await page.getByTestId("input-graph-source").inputValue(),"s");
-    await go("/collections/code/search");
+    await go("/collections/code/corpus-query");
     await page.getByTestId("input-query").fill("parse_config");
     await choose("format","llm");await choose("graph_context","false");await search();
     assert.equal(requests.at(-1).body.include_graph_context,false);
@@ -81,21 +83,21 @@ export async function checkSearchGraph() {
     await choose("format","raw");await choose("graph_context","true");await search();
     assert.equal(requests.at(-1).body.include_graph_context,true);
     for(const kind of ["plain","json"]){failure=kind;await search();assert.match(await page.locator("#results").textContent(),kind==="plain"?/Service unavailable/:/Query failed/);assert.equal(await page.getByTestId("button-search").isEnabled(),true);}
-    await go("/search-multi");
+    await go("/corpus-query");
     await page.getByTestId("input-query").fill("config");
     for(const checkbox of await page.locator('[name="collection"]').all())await checkbox.uncheck();
     const count=requests.length;await search();assert.equal(requests.length,count);
     assert.match(await page.locator("#feedback").textContent(),/Select at least one/);
     await page.locator('[name="collection"][value="code"]').check();await choose("format","llm");await search();
-    assert.equal(requests.at(-1).path,"/api/search/multi");
-    await go("/collections/cards/search");
-    await page.getByTestId("input-query").fill("queue");await choose("mode","vector");
-    await search();assert.equal(requests.at(-1).path,"/api/knowledge-cards/search");
-    await choose("format","llm");await choose("query_type","general");await search();
-    assert.equal(requests.at(-1).path,"/api/corpus/query");
+    assert.equal(requests.at(-1).path,"/api/corpus-query");
+    await go("/collections/cards/corpus-query");
+    await page.getByTestId("input-query").fill("queue");await choose("mode","semantic");
+    await search();assert.equal(requests.at(-1).path,"/api/corpus-query");
+    await choose("format","llm");await choose("perspective","general");await search();
+    assert.equal(requests.at(-1).path,"/api/corpus-query");
     assert.equal(requests.at(-1).body.mode,"semantic");assert.equal(requests.at(-1).body.perspective,"general");
     assert.equal(requests.at(-1).body.minimum_score,.65);
-    await go("/graph");
+    await go("/corpus-graph");
     assert.equal(await page.locator('[name="collection"] option').count(),1);
     graphStatus="ambiguous";await page.getByTestId("input-graph-selector").fill("parse_config");
     const graphRun=async()=>{await page.getByTestId("button-graph-query").click();await page.waitForFunction(()=>!document.querySelector("#graph-form").dataset.busy);};
@@ -116,11 +118,11 @@ export async function checkSearchGraph() {
     await choose("format","llm");await graphRun();assert.match(await page.getByTestId("response-text").textContent(),/Calls:/);
     assert.equal(await page.locator("#graph-results img").count(),0);
     await choose("format","raw");failure="plain";await graphRun();assert.match(await page.locator("#graph-results").textContent(),/Service unavailable/);
-    disabled=true;await go("/graph");assert.equal(await page.getByTestId("button-graph-query").isDisabled(),true);
+    disabled=true;await go("/corpus-graph");assert.equal(await page.getByTestId("button-graph-query").isDisabled(),true);
     assert.match(await page.locator("#graph-summary").textContent(),/disabled/);disabled=false;
-    noCode=true;await go("/graph");assert.match(await page.locator("main").textContent(),/No source-code collections/);noCode=false;
-    await go("/collections/docs/graph");assert.match(await page.locator("main").textContent(),/Source-code collections only/);
-    await go("/graph");
+    noCode=true;await go("/corpus-graph");assert.match(await page.locator("main").textContent(),/No source-code collections/);noCode=false;
+    await go("/collections/docs/corpus-graph");assert.match(await page.locator("main").textContent(),/Source-code collections only/);
+    await go("/corpus-graph");
     await page.setViewportSize({width:375,height:812});
     await page.getByTestId("button-graph-query").click();
     await page.waitForFunction(()=>!document.querySelector("#graph-form").dataset.busy);

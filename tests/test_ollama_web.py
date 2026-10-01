@@ -93,71 +93,102 @@ async def test_rest_full_roundtrip(engine, source_dir):
     p.write_text("# Retrieval\n\nprice $25")
     app = create_app(engine, manage_engine=False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c:
-        assert (await c.get("/api/health")).json()["daemon_ok"]
-        meta = (await c.post("/api/collections", json={"name": "api", "kind": "source_code"})).json()
+        assert (await c.post("/api/health-status", json={})).json()["daemon_ok"]
+        meta = (
+            await c.post("/api/collection-create", json={**({"name": "api", "kind": "source_code"})})
+        ).json()
         assert meta["kind"] == "source_code"
-        r = await c.post("/api/collections/api/add_file", json={"path": str(p)})
+        r = await c.post("/api/collection-add-file", json={**({"path": str(p)}), "collection": "api"})
         assert r.status_code == 200
         source_id = r.json()["source_id"]
         search = await c.post(
-            "/api/search", json={"collection": "api", "query": "retrieval", "mode": "keyword"}
+            "/api/corpus-query", json={"collections": ["api"], "query": "retrieval", "mode": "keyword"}
         )
         assert search.json()["results"]
-        assert (await c.get(f"/api/collections/api/sources/{source_id}")).json()["markdown_path"] is None
-        assert (await c.get("/api/collections/api/metadata_fields")).json()["fields"]
-        assert (await c.get("/api/collections/api/keywords")).json()
-        assert (await c.get("/api/collections/api/manifest")).json()["sources"]
-        assert (await c.patch("/api/collections/api", json={"description": "changed"})).json()[
-            "description"
-        ] == "changed"
-        assert (await c.delete(f"/api/collections/api/sources/{source_id}")).status_code == 400
-        assert (await c.delete(f"/api/collections/api/sources/{source_id}?confirm=true")).status_code == 200
-        assert (await c.post("/api/collections/api/vacuum")).status_code == 200
-        assert (await c.delete("/api/collections/api?confirm=true")).status_code == 200
-        assert (await c.get("/api/collections/absent")).status_code == 404
+        assert (
+            await c.post("/api/collection-get-file", json={"collection": "api", "source_id": source_id})
+        ).json()["markdown_path"] is None
+        assert (await c.post("/api/collection-list-metadata-fields", json={"collection": "api"})).json()
+        assert (await c.post("/api/collection-list-keywords", json={"collection": "api"})).json()
+        assert (await c.post("/api/collection-export-manifest", json={"collection": "api"})).json()["sources"]
+        assert (
+            await c.post(
+                "/api/collection-config-update", json={**({"description": "changed"}), "name": "api"}
+            )
+        ).json()["description"] == "changed"
+        assert (
+            await c.post("/api/collection-remove-file", json={"collection": "api", "source_id": source_id})
+        ).status_code == 400
+        assert (
+            await c.post(
+                "/api/collection-remove-file",
+                json={"collection": "api", "source_id": source_id, "confirm": True},
+            )
+        ).status_code == 200
+        assert (await c.post("/api/collection-vacuum", json={"collection": "api"})).status_code == 200
+        assert (
+            await c.post("/api/collection-delete", json={"name": "api", "confirm": True})
+        ).status_code == 200
+        assert (await c.post("/api/collection-get", json={"name": "absent"})).status_code == 404
 
 
 async def test_upload_and_request_validation(engine):
     app = create_app(engine, False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c:
-        await c.post("/api/collections", json={"name": "uploads"})
+        await c.post("/api/collection-create", json={**({"name": "uploads"})})
         r = await c.post(
-            "/api/collections/uploads/upload",
-            files={"file": ("../../test.txt", b"upload retrieval", "text/plain")},
+            "/api/collection-upload-file",
+            json={
+                "collection": "uploads",
+                "filename": "test.txt",
+                "content_base64": "dXBsb2FkIHJldHJpZXZhbA==",
+            },
         )
         assert r.status_code == 200, r.text
-        source = engine.get_source("uploads", r.json()["source_id"])
+        source = engine.collection_get_file("uploads", r.json()["source_id"])
         assert source["origin_type"] == "upload"
         assert ".." not in source["managed_relative_path"]
-        bad = await c.post("/api/collections", json={"name": "../bad"})
+        bad = await c.post("/api/collection-create", json={**({"name": "../bad"})})
         assert bad.status_code == 422
-        bad = await c.post("/api/search", json={"collection": "uploads", "query": "x", "mode": "unknown"})
+        bad = await c.post(
+            "/api/corpus-query", json={"collections": ["uploads"], "query": "x", "mode": "unknown"}
+        )
         assert bad.status_code == 422
-        r = await c.post("/api/collections/uploads/add_file", json={"path": "/etc/passwd"})
+        r = await c.post(
+            "/api/collection-add-file", json={**({"path": "/etc/passwd"}), "collection": "uploads"}
+        )
         assert r.status_code == 403
 
 
 async def test_host_origin_auth_and_body_limit(engine, monkeypatch):
     app = create_app(engine, False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c:
-        assert (await c.get("/api/collections", headers={"Host": "evil.example"})).status_code == 403
         assert (
-            await c.get("/api/collections", headers={"Origin": "https://evil.example"})
+            await c.post("/api/collections-list", json={}, headers={"Host": "evil.example"})
         ).status_code == 403
-        assert (await c.get("/api/collections", headers={"Origin": "null"})).status_code == 403
         assert (
-            await c.post("/api/collections", content=b"{}", headers={"Content-Length": "9000000000"})
+            await c.post("/api/collections-list", json={}, headers={"Origin": "https://evil.example"})
+        ).status_code == 403
+        assert (await c.post("/api/collections-list", json={}, headers={"Origin": "null"})).status_code == 403
+        assert (
+            await c.post(
+                "/api/collection-create", json={}, content=b"{}", headers={"Content-Length": "9000000000"}
+            )
         ).status_code == 413
         engine.config.server.web_auth_mode = "password"
         monkeypatch.setenv("RAGDBMAN_AUTH_TOKEN", "private-test-secret")
     # Credentials are snapshotted at app creation; changing them requires restart.
     app = create_app(engine, False)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://localhost") as c:
-        assert (await c.get("/api/collections")).status_code == 401
+        assert (await c.post("/api/collections-list", json={})).status_code == 401
         assert (
-            await c.get("/api/collections", headers={"Authorization": "Bearer private-test-secret"})
+            await c.post(
+                "/api/collections-list", json={}, headers={"Authorization": "Bearer private-test-secret"}
+            )
         ).status_code == 200
-        assert (await c.get("/api/collections", auth=("ragdbman", "private-test-secret"))).status_code == 200
+        assert (
+            await c.post("/api/collections-list", json={}, auth=("ragdbman", "private-test-secret"))
+        ).status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -169,8 +200,8 @@ async def test_host_origin_auth_and_body_limit(engine, monkeypatch):
         "/collections/a/upload",
         "/collections/a/sources",
         "/collections/a/jobs/123",
-        "/collections/a/search",
-        "/search-multi",
+        "/collections/a/corpus-query",
+        "/corpus-query",
     ],
 )
 async def test_ui_routes(engine, path):
@@ -224,7 +255,7 @@ def test_mcp_streamable_http_wire_protocol(cfg, fake, source_dir, monkeypatch):
             headers=headers,
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        assert len(tools.json()["result"]["tools"]) == 6
+        assert len(tools.json()["result"]["tools"]) == 28
         created = client.post(
             "/mcp/admin",
             headers=headers,
@@ -233,8 +264,8 @@ def test_mcp_streamable_http_wire_protocol(cfg, fake, source_dir, monkeypatch):
                 "id": 3,
                 "method": "tools/call",
                 "params": {
-                    "name": "corpus_manage",
-                    "arguments": {"request": {"action": "create", "name": "mcp"}},
+                    "name": "collection_create",
+                    "arguments": {"name": "mcp"},
                 },
             },
         )

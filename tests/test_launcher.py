@@ -81,13 +81,15 @@ async def check():
     engine = Engine(cfg, Embedder())
     try:
         for kind in ('general', 'knowledge_cards'):
-            await engine.create_collection(name=kind, kind=kind)
+            await engine.collection_create(name=kind, kind=kind)
         app = create_app(engine, False)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                     base_url='http://localhost') as client:
-            for path in ('/', '/static/app.js', '/static/style.css', '/api/collections'):
+            for path in ('/', '/static/app.js', '/static/style.css'):
                 response = await client.get(path)
                 assert response.status_code == 200, (path, response.text)
+            response = await client.post('/api/collections-list', json={})
+            assert response.status_code == 200
         assert 'ragdbman' not in sys.modules
         print('UI, assets, both schemas: no launcher import')
     finally:

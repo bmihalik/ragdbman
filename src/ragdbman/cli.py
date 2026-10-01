@@ -73,6 +73,7 @@ def init_config(path: Path):
 def parser():
     result = argparse.ArgumentParser(
         prog="ragdbman",
+        allow_abbrev=False,
         description="Index and query local documents, source code and Knowledge Cards; "
         "serve a web UI, REST API and MCP tools.",
         formatter_class=HelpFormatter,
@@ -89,10 +90,11 @@ def parser():
     levels = ["trace", "debug", "verbose", "info", "warning", "warn", "error", "critical"]
     result.add_argument("--log-level", choices=levels, help=OPTION_HELP["log_level"])
     sub = result.add_subparsers(dest="command", required=True, title="commands", metavar="COMMAND")
-    for command in ("serve", "init", "registry-repair", "fetch-tokenizer", *COMMANDS):
+    for command in ("serve", "init", "fetch-tokenizer", *COMMANDS):
         summary, details, _ = COMMAND_HELP[command]
         item = sub.add_parser(
             command,
+            allow_abbrev=False,
             help=summary,
             description=f"{summary}\n\n{details}",
             formatter_class=HelpFormatter,
@@ -121,8 +123,6 @@ async def run_local(config, args, method=None, kwargs=None):
     engine = Engine(config)
     with LocalSignals(engine):
         try:
-            if args.command == "registry-repair":
-                return engine.list_collections()
             return await local(engine, args, method, kwargs)
         finally:
             await engine.close()
@@ -177,7 +177,7 @@ def main(argv=None):
             else:
                 with DataDirectoryLock(config):
                     payload = asyncio.run(run_local(config, args, method, kwargs))
-            emit(args, payload, snapshot=args.command == "get-job" and args.watch)
+            emit(args, payload, snapshot=args.command == "scan-job-get" and args.watch)
             status = exit_status(args, payload)
             if status:
                 raise SystemExit(status)
@@ -196,11 +196,7 @@ def main(argv=None):
                 "CONFIG_INVALID", "Set RAGDBMAN_AUTH_TOKEN before enabling authenticated server access"
             )
         with DataDirectoryLock(config):
-            if args.command == "registry-repair":
-                records = asyncio.run(run_local(config, args))
-                print(f"Registry repaired: {len(records)} collection(s)")
-            else:
-                serve(config, level)
+            serve(config, level)
     except Interrupted as exc:
         print(
             json.dumps(

@@ -119,8 +119,8 @@ clear-then-index behavior; it is not a shadow-index swap.
 
 ## Search enrichment
 
-`corpus_query`, administrative `/api/corpus/query`, `/api/search`, and
-`/api/search/multi` accept `include_graph_context`.
+`corpus_query` and administrative `/api/corpus-query` accept `include_graph_context`.
+The CLI uses the corresponding `--include-graph-context` option.
 
 - **Omitted/null:** enrich source-code collections when graphs are enabled.
 - **False:** omit graph enrichment entirely.
@@ -140,17 +140,17 @@ The web **Graphs** view and source-code collection **Graph explorer** expose
 this contract with raw/LLM output, entity selection and traversal controls.
 See [WEB_UI.md](WEB_UI.md); browser access retains administrative authentication.
 
-MCP tool: `corpus_graph`, with one `request` object.
-Administrative REST: `POST /api/corpus/graph`, with that object as the JSON body.
+MCP tool: `corpus_graph`, with flat arguments.
+Administrative REST: `POST /api/corpus-graph`, with those fields as the JSON body.
 REST retains administrator authentication; a query-only token cannot bypass it.
 The MCP query profile enforces the same collection allowlist as `corpus_query`.
 
 ```json
-{"request":{"collection":"code","action":"find","symbol":"parse_config","limit":20}}
+{"collection":"code","action":"find","symbol":"parse_config","limit":20}
 ```
 
 ```json
-{"request":{"collection":"code","action":"callers","entity_id":"ID_FROM_FIND","depth":2,"limit":50}}
+{"collection":"code","action":"callers","entity_id":"ID_FROM_FIND","depth":2,"limit":50}
 ```
 
 | Parameter | Meaning |

@@ -21,37 +21,42 @@ import tomli_w
 
 from ragdbman.cli import main, parser
 from ragdbman.cli_commands import COMMANDS, contract, emit, endpoint, numeric, remote, table, wait_job
+from ragdbman.corpus import CorpusQuery
 from ragdbman.errors import RagError
 from ragdbman.process_lock import DataDirectoryLock
 
 CASES = [
     ("health-status", []),
-    ("list-collections", []),
-    ("get-collection", ["--name", "docs"]),
-    ("create-collection", ["--name", "docs", "--kind", "knowledge_cards"]),
-    ("update-collection-config", ["--name", "docs", "--description", "new"]),
-    ("delete-collection", ["--name", "docs", "--confirm"]),
-    ("list-source-roots", ["--collection", "docs"]),
-    ("add-source-root", ["--collection", "docs", "--path", "/data"]),
-    ("remove-source-root", ["--collection", "docs", "--root-id", "root"]),
-    ("start-scan", ["--collection", "docs", "--root", "/data"]),
-    ("add-file", ["--collection", "docs", "--path", "/data/a"]),
-    ("remove-source", ["--collection", "docs", "--source-id", "source", "--confirm"]),
-    ("get-job", ["--collection", "docs", "--job-id", "job"]),
-    ("list-jobs", ["--collection", "docs"]),
-    ("cancel-job", ["--job-id", "job"]),
-    ("resume-job", ["--collection", "docs", "--job-id", "job"]),
-    ("search", ["--collection", "docs", "--query", "text"]),
-    ("search-multi", ["--collections", "docs,code", "--query", "text"]),
-    ("list-sources", ["--collection", "docs"]),
-    ("get-source", ["--collection", "docs", "--source-id", "source"]),
-    ("list-keywords", ["--collection", "docs"]),
-    ("list-metadata-fields", ["--collection", "docs"]),
-    ("export-collection-manifest", ["--collection", "docs"]),
-    ("rebuild-collection", ["--collection", "docs", "--confirm"]),
-    ("vacuum-collection", ["--collection", "docs"]),
-    ("graph", ["--collection", "docs", "--action", "find"]),
-    ("search-knowledge-cards", ["--collection", "docs", "--query", "text"]),
+    ("collections-list", []),
+    ("collection-get", ["--name", "docs"]),
+    ("collection-create", ["--name", "docs", "--kind", "knowledge_cards"]),
+    ("collection-config-update", ["--name", "docs", "--description", "new"]),
+    ("collection-delete", ["--name", "docs", "--confirm"]),
+    ("collection-list-roots", ["--collection", "docs"]),
+    ("collection-add-root", ["--collection", "docs", "--path", "/data"]),
+    ("collection-remove-root", ["--collection", "docs", "--root-id", "root", "--confirm"]),
+    ("scan-start", ["--collection", "docs", "--root", "/data"]),
+    ("collection-add-file", ["--collection", "docs", "--path", "/data/a"]),
+    ("collection-remove-file", ["--collection", "docs", "--source-id", "source", "--confirm"]),
+    ("scan-job-get", ["--collection", "docs", "--job-id", "job"]),
+    ("scan-jobs-list", ["--collection", "docs"]),
+    ("scan-job-cancel", ["--job-id", "job"]),
+    ("scan-job-resume", ["--collection", "docs", "--job-id", "job"]),
+    ("corpus-describe", []),
+    ("corpus-query", ["--collections", "docs,code", "--query", "text"]),
+    ("collection-list-files", ["--collection", "docs"]),
+    ("collection-get-file", ["--collection", "docs", "--source-id", "source"]),
+    ("collection-list-keywords", ["--collection", "docs"]),
+    ("collection-list-metadata-fields", ["--collection", "docs"]),
+    ("collection-export-manifest", ["--collection", "docs"]),
+    ("collection-rebuild", ["--collection", "docs", "--confirm"]),
+    ("collection-vacuum", ["--collection", "docs"]),
+    ("corpus-graph", ["--collection", "docs", "--action", "find"]),
+    ("collections-registry-repair", []),
+    (
+        "collection-upload-file",
+        ["--collection", "docs", "--filename", "test.txt", "--content-base64", "aGk="],
+    ),
 ]
 
 
@@ -59,7 +64,7 @@ CASES = [
 def test_contracts_and_routes(command, options):
     args = parser().parse_args(["--config", "/tmp/custom", "--log-level", "debug", command, *options])
     assert args.config == "/tmp/custom" and args.log_level == "debug"
-    assert args.format == "json"
+    assert args.format == "raw"
     method, kwargs = contract(args)
     assert method == command.replace("-", "_")
     verb, path, params, body = endpoint(args, kwargs)
@@ -72,10 +77,10 @@ def test_contracts_and_routes(command, options):
 @pytest.mark.parametrize(
     "options",
     [
-        ["delete-collection", "--name", "docs"],
-        ["remove-source", "--collection", "docs", "--source-id", "s"],
-        ["rebuild-collection", "--collection", "docs"],
-        ["start-scan", "--collection", "docs", "--root", "/data", "--prune-missing"],
+        ["collection-delete", "--name", "docs"],
+        ["collection-remove-file", "--collection", "docs", "--source-id", "s"],
+        ["collection-rebuild", "--collection", "docs"],
+        ["scan-start", "--collection", "docs", "--root", "/data", "--prune-missing"],
     ],
 )
 def test_confirmation_before_engine_creation(options, cfg, tmp_path, capsys):
@@ -93,30 +98,24 @@ def test_filter_mapping_and_global_overrides():
         [
             "--config",
             "/first",
-            "search",
-            "--collection",
+            "corpus-query",
+            "--collections",
             "docs",
             "--query",
             "",
             "--mode",
             "structured",
-            "--extensions",
-            ".pdf,md",
-            "--keywords",
-            "fee, cost",
-            "--source-ids",
-            "one,two",
-            "--path-prefix",
-            "/data",
-            "--no-text",
-            "--no-links",
+            "--filters",
+            '{"source_extensions":[".pdf","md"],"keywords":["fee","cost"],"source_ids":["one","two"],"path_prefix":"/data"}',
+            "--no-include-text",
+            "--no-include-links",
             "--numeric",
             "amount greater_than 1000",
             "--numeric",
             "date between 2024-01-01 2024-12-31",
             "--numeric",
             "amount exists",
-            "--no-graph-context",
+            "--no-include-graph-context",
             "--format",
             "llm",
             "--config",
@@ -124,7 +123,7 @@ def test_filter_mapping_and_global_overrides():
         ]
     )
     assert args.config == "/second"
-    req = contract(args)[1]["request"]
+    req = CorpusQuery(**contract(args)[1])
     assert req.format == "llm" and req.include_graph_context is False
     assert not req.include_text and not req.include_links
     assert req.filters.source_extensions == [".pdf", "md"]
@@ -151,14 +150,14 @@ def test_bad_numeric_filters(text):
 @pytest.mark.parametrize(
     "options",
     [
-        ["search", "--collection", "docs"],
-        ["list-jobs", "--collection", "docs", "--status", "bogus"],
-        ["list-sources", "--collection", "docs", "--offset", "-1"],
-        ["search", "--collection", "../x", "--query", "a"],
-        ["search-multi", "--collections", "a,,b", "--query", "a"],
-        ["list-jobs", "--collection", "docs", "--limit", "0"],
-        ["list-collections", "--server-url", ""],
-        ["get-source", "--collection", "docs", "--source-id", ""],
+        ["corpus-query", "--collections", "docs"],
+        ["scan-jobs-list", "--collection", "docs", "--status", "bogus"],
+        ["collection-list-files", "--collection", "docs", "--offset", "-1"],
+        ["corpus-query", "--collections", "../x", "--query", "a"],
+        ["corpus-query", "--collections", "a,,b", "--query", "a"],
+        ["scan-jobs-list", "--collection", "docs", "--limit", "0"],
+        ["collections-list", "--server-url", ""],
+        ["collection-get-file", "--collection", "docs", "--source-id", ""],
     ],
 )
 def test_argument_errors(options):
@@ -177,11 +176,20 @@ def test_lock_contention_and_release(cfg):
 
 
 def test_tables_empty_diagnostics_and_escaped_controls():
-    assert table("list-jobs", []) == "(no rows)"
+    assert table("scan-jobs-list", []) == "(no rows)"
     result = table(
-        "search-multi",
+        "corpus-query",
         {
-            "results": [{"source_filename": "bad\n\x1b[31m", "score": 0.5, "text": "long" * 80}],
+            "results": [
+                {
+                    "rank": 1,
+                    "kind": "document",
+                    "collection": "docs",
+                    "title": "bad\n\x1b[31m",
+                    "relevance": {"score": 0.5},
+                    "content": "long" * 80,
+                }
+            ],
             "collections_failed": [{"collection": "missing", "reason": "not found"}],
             "skipped_filters": [{"field": "bad", "reason": "unknown"}],
         },
@@ -192,7 +200,7 @@ def test_tables_empty_diagnostics_and_escaped_controls():
 
 def test_manifest_output_refuses_overwrite(tmp_path, capsys):
     path = tmp_path / "manifest.json"
-    args = parser().parse_args(["export-collection-manifest", "--collection", "docs", "--output", str(path)])
+    args = parser().parse_args(["collection-export-manifest", "--collection", "docs", "--output", str(path)])
     emit(args, {"value": "árvíz"})
     assert json.loads(path.read_text()) == {"value": "árvíz"} and not capsys.readouterr().out
     with pytest.raises(FileExistsError):
@@ -201,7 +209,7 @@ def test_manifest_output_refuses_overwrite(tmp_path, capsys):
 
 
 async def test_watch_json_lines_and_poll_interval(monkeypatch, capsys):
-    args = parser().parse_args(["get-job", "--collection", "docs", "--job-id", "j", "--watch"])
+    args = parser().parse_args(["scan-job-get", "--collection", "docs", "--job-id", "j", "--watch"])
     sleeps = []
 
     async def sleep(delay):
@@ -234,7 +242,7 @@ async def test_watch_json_lines_and_poll_interval(monkeypatch, capsys):
     ],
 )
 async def test_remote_refuses_unsafe_url(url):
-    args = parser().parse_args(["list-collections", "--server-url", url])
+    args = parser().parse_args(["collections-list", "--server-url", url])
     with pytest.raises(RagError, match="CONFIG_INVALID"):
         await remote(args, {})
 
@@ -249,7 +257,7 @@ async def test_remote_transport_no_local_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(
         httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handler), **kw)
     )
-    args = parser().parse_args(["list-collections", "--server-url", "http://127.0.0.1:8765"])
+    args = parser().parse_args(["collections-list", "--server-url", "http://127.0.0.1:8765"])
     with pytest.raises(RagError, match="PATH_NOT_ALLOWED"):
         await remote(args, {})
 
@@ -265,7 +273,7 @@ def test_connection_failure_never_constructs_engine(monkeypatch, cfg, tmp_path, 
     path = tmp_path / "remote.toml"
     path.write_text(tomli_w.dumps(cfg.model_dump(exclude_none=True)))
     with pytest.raises(SystemExit) as exc:
-        main(["list-collections", "--config", str(path), "--server-url", "http://127.0.0.1:8765"])
+        main(["collections-list", "--config", str(path), "--server-url", "http://127.0.0.1:8765"])
     assert exc.value.code == 1
     captured = capsys.readouterr()
     assert not captured.out and "DAEMON_UNAVAILABLE" in captured.err
@@ -328,74 +336,82 @@ def test_real_cli_collection_scan_search_and_maintenance(cli_env, tmp_path):
     assert json.loads(run("health-status").stdout)["ollama_reachable"]
     created = json.loads(
         run(
-            "create-collection", "--name", "code", "--kind", "source_code", "--source-roots", str(root)
+            "collection-create", "--name", "code", "--kind", "source_code", "--source-roots", str(root)
         ).stdout
     )
     assert created["kind"] == "source_code"
-    job = json.loads(run("start-scan", "--collection", "code", "--root", str(root)).stdout)
+    job = json.loads(run("scan-start", "--collection", "code", "--root", str(root)).stdout)
     assert job["status"] == "completed" and job["progress"]["completed"] == 1
     assert (
-        json.loads(run("get-job", "--collection", "code", "--job-id", job["id"]).stdout)["status"]
+        json.loads(run("scan-job-get", "--collection", "code", "--job-id", job["id"]).stdout)["status"]
         == "completed"
     )
-    cancelled = run("cancel-job", "--job-id", job["id"], code=1)
+    cancelled = run("scan-job-cancel", "--job-id", job["id"], code=1)
     assert "CONFIG_INVALID" in cancelled.stderr
     assert (
-        json.loads(run("get-job", "--collection", "code", "--job-id", job["id"]).stdout)["status"]
+        json.loads(run("scan-job-get", "--collection", "code", "--job-id", job["id"]).stdout)["status"]
         == "completed"
     )
-    assert json.loads(run("list-jobs", "--collection", "code", "--status", "completed").stdout)
-    assert "source_code" in run("list-collections", "--format", "table").stdout
+    assert json.loads(run("scan-jobs-list", "--collection", "code", "--status", "completed").stdout)
+    assert "source_code" in run("collections-list", "--format", "table").stdout
     result = json.loads(
-        run("search", "--collection", "code", "--query", "parse_config", "--mode", "keyword").stdout
+        run("corpus-query", "--collections", "code", "--query", "parse_config", "--mode", "keyword").stdout
     )
     assert result["results"][0]["graph_context"]["available"]
     llm = run(
-        "search", "--collection", "code", "--query", "parse_config", "--mode", "keyword", "--format", "llm"
+        "corpus-query",
+        "--collections",
+        "code",
+        "--query",
+        "parse_config",
+        "--mode",
+        "keyword",
+        "--format",
+        "llm",
     )
     assert "function:" in llm.stdout
     assert json.loads(
-        run("graph", "--collection", "code", "--action", "find", "--symbol", "parse_config").stdout
+        run("corpus-graph", "--collection", "code", "--action", "find", "--symbol", "parse_config").stdout
     )["candidates"]
     mixed = json.loads(
         run(
-            "search-multi", "--collections", "code,missing", "--query", "parse_config", "--mode", "keyword"
+            "corpus-query", "--collections", "code,missing", "--query", "parse_config", "--mode", "keyword"
         ).stdout
     )
-    assert mixed["collections_searched"] == ["code"] and mixed["collections_failed"]
-    run("search-multi", "--collections", "missing", "--query", "anything", "--mode", "keyword", code=3)
-    sources = json.loads(run("list-sources", "--collection", "code", "--extension", ".py").stdout)
+    assert mixed["collections_searched"] == ["code"] and mixed["warnings"]
+    run("corpus-query", "--collections", "missing", "--query", "anything", "--mode", "keyword", code=3)
+    sources = json.loads(run("collection-list-files", "--collection", "code", "--extension", ".py").stdout)
     assert len(sources) == 1
     assert (
-        json.loads(run("get-source", "--collection", "code", "--source-id", sources[0]["id"]).stdout)[
-            "status"
-        ]
+        json.loads(
+            run("collection-get-file", "--collection", "code", "--source-id", sources[0]["id"]).stdout
+        )["status"]
         == "indexed"
     )
-    assert json.loads(run("list-keywords", "--collection", "code").stdout)
-    assert json.loads(run("list-metadata-fields", "--collection", "code").stdout)
+    assert json.loads(run("collection-list-keywords", "--collection", "code").stdout)
+    assert json.loads(run("collection-list-metadata-fields", "--collection", "code").stdout)
     manifest = tmp_path / "manifest.json"
-    run("export-collection-manifest", "--collection", "code", "--output", str(manifest))
+    run("collection-export-manifest", "--collection", "code", "--output", str(manifest))
     assert json.loads(manifest.read_text())["sources"][0]["id"] == sources[0]["id"]
     assert (
-        json.loads(run("rebuild-collection", "--collection", "code", "--confirm").stdout)["status"]
+        json.loads(run("collection-rebuild", "--collection", "code", "--confirm").stdout)["status"]
         == "completed"
     )
-    run("vacuum-collection", "--collection", "code")
-    run("remove-source", "--collection", "code", "--source-id", sources[0]["id"], "--confirm")
+    run("collection-vacuum", "--collection", "code")
+    run("collection-remove-file", "--collection", "code", "--source-id", sources[0]["id"], "--confirm")
     assert (root / "a.py").exists()
-    run("delete-collection", "--name", "code", "--confirm")
-    assert json.loads(run("list-collections").stdout) == []
+    run("collection-delete", "--name", "code", "--confirm")
+    assert json.loads(run("collections-list").stdout) == []
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="console signal integration checked on Linux")
 def test_foreground_scan_signal_cleanup_and_resume(cli_env):
     cfg, root, run, prefix, env, state = cli_env
     (root / "a.txt").write_text("queue example")
-    run("create-collection", "--name", "docs")
+    run("collection-create", "--name", "docs")
     state["delay"] = 3
     proc = subprocess.Popen(
-        [*prefix, "start-scan", "--collection", "docs", "--root", str(root)],
+        [*prefix, "scan-start", "--collection", "docs", "--root", str(root)],
         cwd="/tmp",
         env=env,
         text=True,
@@ -413,15 +429,15 @@ def test_foreground_scan_signal_cleanup_and_resume(cli_env):
             time.sleep(0.05)
         else:
             pytest.fail("CLI scan did not start")
-        busy = run("list-collections", code=1)
+        busy = run("collections-list", code=1)
         assert "DATA_DIRECTORY_BUSY" in busy.stderr
         proc.send_signal(signal.SIGINT)
         stdout, stderr = proc.communicate(timeout=10)
         assert proc.returncode == 130, (stdout, stderr)
         state["delay"] = 0
-        job = json.loads(run("get-job", "--collection", "docs", "--job-id", row[0], code=3).stdout)
+        job = json.loads(run("scan-job-get", "--collection", "docs", "--job-id", row[0], code=3).stdout)
         assert job["status"] == "paused"
-        resumed = json.loads(run("resume-job", "--collection", "docs", "--job-id", row[0]).stdout)
+        resumed = json.loads(run("scan-job-resume", "--collection", "docs", "--job-id", row[0]).stdout)
         assert resumed["status"] == "completed"
     finally:
         if proc.poll() is None:
@@ -444,37 +460,52 @@ def test_daemon_commands_watch_cancel_and_ownership(cli_env):
         ) as client:
             while time.monotonic() < deadline:
                 try:
-                    if client.get(url + "/api/collections").status_code == 200:
+                    if client.post(url + "/api/collections-list", json={}).status_code == 200:
                         break
                 except httpx.HTTPError:
                     pass
                 time.sleep(0.05)
             else:
                 pytest.fail("daemon did not start")
-        assert "DATA_DIRECTORY_BUSY" in run("list-collections", code=1).stderr
-        run("create-collection", "--name", "docs", "--server-url", url)
+        assert "DATA_DIRECTORY_BUSY" in run("collections-list", code=1).stderr
+        run("collection-create", "--name", "docs", "--server-url", url)
         (root / "a.txt").write_text("queue")
         state["delay"] = 3
         job = json.loads(
-            run("start-scan", "--collection", "docs", "--root", str(root), "--server-url", url).stdout
+            run("scan-start", "--collection", "docs", "--root", str(root), "--server-url", url).stdout
         )
         assert job["status"] == "queued"
-        run("cancel-job", "--job-id", job["id"], "--server-url", url)
+        run("scan-job-cancel", "--job-id", job["id"], "--server-url", url)
         watched = run(
-            "get-job", "--collection", "docs", "--job-id", job["id"], "--watch", "--server-url", url, code=3
+            "scan-job-get",
+            "--collection",
+            "docs",
+            "--job-id",
+            job["id"],
+            "--watch",
+            "--server-url",
+            url,
+            code=3,
         )
         assert json.loads(watched.stdout.splitlines()[-1])["status"] == "cancelled"
         assert env["RAGDBMAN_AUTH_TOKEN"] not in watched.stdout + watched.stderr
         state["delay"] = 0
         resumed = json.loads(
             run(
-                "resume-job", "--collection", "docs", "--job-id", job["id"], "--server-url", url, "--wait"
+                "scan-job-resume",
+                "--collection",
+                "docs",
+                "--job-id",
+                job["id"],
+                "--server-url",
+                url,
+                "--wait",
             ).stdout
         )
         assert resumed["status"] == "completed"
         llm = run(
-            "search",
-            "--collection",
+            "corpus-query",
+            "--collections",
             "docs",
             "--query",
             "queue",
@@ -489,4 +520,4 @@ def test_daemon_commands_watch_cancel_and_ownership(cli_env):
     finally:
         server.send_signal(signal.SIGINT)
         server.wait(timeout=15)
-    assert json.loads(run("list-collections").stdout)[0]["name"] == "docs"
+    assert json.loads(run("collections-list").stdout)[0]["name"] == "docs"

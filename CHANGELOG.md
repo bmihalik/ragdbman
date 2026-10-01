@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+- Adopt canonical corpus, collection, collections and scan operation names across
+  Python, MCP, REST, CLI and browser calls, with no compatibility aliases.
+- Generate all 28 service operation schemas/registrations from `operations.py`.
+  Python/MCP use underscores; CLI and named POST REST routes use hyphens.
+- Align all public retrieval on corpus-query, including documents, source code,
+  Knowledge Cards, one/multiple collections and structured filter-only mode.
+  Use semantic, limit, perspective and minimum_score consistently.
+- Keep the query MCP surface at three read-only tools. The separately enabled
+  admin profile exposes individually named operations with per-operation hints.
+  Every tool takes flat arguments; remove generic management action dispatchers.
+- Add corpus-describe to CLI/Python, consistent base64 managed uploads and
+  Engine-level confirmation for root removal and missing-file pruning.
+- Use the canonical query envelope in the web UI; rename its query/graph pages.
+  Retain safe raw/LLM output, static job inspection and graph navigation.
+- Rewrite current interface guides and generate `docs/INTERFACES.md` with a
+  check mode. Port existing regressions and add cross-interface parity,
+  removed-alias, strict-schema and authorization tests.
+- Existing SQLite data, source identities and index formats are unchanged.
+
+Earlier entries below are historical release records, not the current interface
+contract. Use `docs/INTERFACES.md` for names and fields supported by this release.
+
 ## 0.5.4
 
 - Replace terse argparse listings with a self-contained CLI help catalog:
@@ -117,7 +141,7 @@ as completed by this consistency review.
   JSON/text responses with safe static copy/select panels and mobile layouts.
 
 - Extend the CLI with all 25 requested engine-service commands, retaining
-  serve/init/registry-repair/fetch-tokenizer, plus graph and Knowledge Card search.
+  serve/init/collections-registry-repair/fetch-tokenizer, plus graph and Knowledge Card search.
 - Add global config/log flags, validated named arguments, repeated numeric
   filters, JSON/table output, existing LLM presentation and exclusive manifest export.
 - Run local scan/rebuild/resume jobs to a stopped state before engine cleanup;

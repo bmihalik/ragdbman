@@ -1,11 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Bela Istvan MIHALIK
 # SPDX-License-Identifier: Apache-2.0
 
-"""Explicit CLI contracts, local engine calls and optional administrative REST transport."""
+"""Canonical CLI parsing, rendering and local/REST dispatch."""
 
 import argparse
 import asyncio
-import inspect
 import ipaddress
 import json
 import os
@@ -13,82 +12,30 @@ import re
 import shlex
 import sys
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 import httpx
 
-from .errors import RagError, require_confirmation
-from .graph.query import GraphRequest
-from .models import (
-    CreateCollection,
-    KnowledgeCardSearchRequest,
-    MultiSearchRequest,
-    NumericFilter,
-    SearchFilters,
-    SearchRequest,
-)
+from .errors import RagError
+from .models import NumericFilter
+from .operations import JOB_OPERATIONS, OPERATIONS, invoke, validate
 
-COMMANDS = (
-    "health-status",
-    "list-collections",
-    "get-collection",
-    "create-collection",
-    "update-collection-config",
-    "delete-collection",
-    "list-source-roots",
-    "add-source-root",
-    "remove-source-root",
-    "start-scan",
-    "add-file",
-    "remove-source",
-    "get-job",
-    "list-jobs",
-    "cancel-job",
-    "resume-job",
-    "search",
-    "search-multi",
-    "list-sources",
-    "get-source",
-    "list-keywords",
-    "list-metadata-fields",
-    "export-collection-manifest",
-    "rebuild-collection",
-    "vacuum-collection",
-    "graph",
-    "search-knowledge-cards",
-)
-JOBS = {"start-scan", "resume-job", "rebuild-collection"}
-JOB_STATUSES = ("queued", "running", "paused", "completed", "completed_with_errors", "failed", "cancelled")
-SOURCE_STATUSES = (
-    "discovered",
-    "extracting",
-    "embedding",
-    "indexed",
-    "failed",
-    "unsupported",
-    "queued",
-    "missing",
-)
+COMMANDS = tuple(name.replace("_", "-") for name in OPERATIONS)
+JOBS = {name.replace("_", "-") for name in JOB_OPERATIONS}
 
 
 def positive(text):
     value = int(text)
     if value < 1:
-        raise argparse.ArgumentTypeError("must be a positive integer")
+        raise argparse.ArgumentTypeError("must be positive")
     return value
 
 
 def nonnegative(text):
     value = int(text)
     if value < 0:
-        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+        raise argparse.ArgumentTypeError("must be nonnegative")
     return value
-
-
-def name(text):
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", text):
-        raise argparse.ArgumentTypeError("invalid collection name")
-    return text
 
 
 def nonempty(text):
@@ -98,227 +45,109 @@ def nonempty(text):
 
 
 def csv_list(text):
-    values = [s.strip() for s in text.split(",")]
+    values = [v.strip() for v in text.split(",")]
     if not all(values):
         raise argparse.ArgumentTypeError("expected a nonempty comma-separated list")
     return list(dict.fromkeys(values))
 
 
+def collection_name(text):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", text):
+        raise argparse.ArgumentTypeError("invalid collection name")
+    return text
+
+
 def collection_list(text):
-    return [name(value) for value in csv_list(text)]
+    return [collection_name(value) for value in csv_list(text)]
 
 
 def numeric(text):
     try:
-        values = shlex.split(text)
-        if len(values) < 2:
-            raise ValueError("expected field op [value]")
-        field, op, *operands = values
+        field, op, *operands = shlex.split(text)
         count = 0 if op == "exists" else 2 if op == "between" else 1
         if len(operands) != count:
             raise ValueError(f"{op} requires {count} operand(s)")
-        data = {"field": field, "op": op}
+        values = {"field": field, "op": op}
         if op == "between":
-            data.update({"from": operands[0], "to": operands[1]})
+            values.update({"from": operands[0], "to": operands[1]})
         elif op != "exists":
-            data["value"] = operands[0]
-        return NumericFilter(**data)
+            values["value"] = operands[0]
+        return NumericFilter(**values)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"invalid numeric filter: {exc}") from exc
 
 
 def arguments(item, command):
-    item.add_argument("--server-url", type=nonempty, help="Explicit daemon URL; never opens local databases")
+    op = command.replace("-", "_")
+    schema = OPERATIONS[op].model.model_json_schema()
     item.add_argument(
-        "--timeout", type=positive, default=600, help="REST request timeout in seconds (default 600)"
+        "--server-url", type=nonempty, help="Daemon administrative REST URL; no local fallback."
     )
-    formats = ["json", "table"]
-    if command in {"search", "search-multi", "graph"}:
-        formats.append("llm")
-    item.add_argument("--format", choices=formats, default="json")
-    if command in {"get-collection", "create-collection", "update-collection-config", "delete-collection"}:
-        item.add_argument("--name", type=name, required=True)
-    elif command not in {"health-status", "list-collections", "cancel-job", "search-multi"}:
-        item.add_argument("--collection", type=name, required=True)
-    if command == "create-collection":
-        item.add_argument("--description")
-        item.add_argument("--source-roots", type=csv_list, default=[])
-        item.add_argument("--kind", choices=["general", "source_code", "knowledge_cards"], default="general")
-        item.add_argument("--embedding-model")
-        item.add_argument("--chunk-size-tokens", type=positive)
-        item.add_argument("--chunk-overlap-tokens", type=nonnegative)
-    if command == "update-collection-config":
-        item.add_argument("--description")
-    if command in {"delete-collection", "remove-source", "rebuild-collection", "start-scan"}:
-        item.add_argument("--confirm", action="store_true")
-    if command == "delete-collection":
-        item.add_argument("--delete-files", action="store_true")
-    if command in {"add-source-root", "add-file"}:
-        item.add_argument("--path", type=nonempty, required=True)
-    if command == "remove-source-root":
-        item.add_argument("--root-id", type=nonempty, required=True)
-    if command in {"add-source-root", "start-scan"}:
-        item.add_argument("--no-recursive", dest="recursive", action="store_false", default=True)
-    if command == "start-scan":
-        item.add_argument("--root", type=nonempty, required=True)
-        item.add_argument("--prune-missing", action="store_true")
+    item.add_argument("--timeout", type=positive, default=600, help="Per-request REST timeout in seconds.")
+    if op not in {"corpus_query", "corpus_graph"}:
+        item.add_argument("--format", choices=["raw", "table"], default="raw", help="Output presentation.")
+    for name, prop in schema["properties"].items():
+        option = "--" + name.replace("_", "-")
+        default = prop.get("default")
+        required = name in schema.get("required", [])
+        help_text = prop.get("description") or f"{name.replace('_', ' ').capitalize()} for {command}."
+        kwargs = dict(default=default, required=required, help=help_text)
+        if name == "format":
+            kwargs.update(choices=["raw", "llm", "table"], default="raw")
+        elif name in {"collections", "source_roots", "relationships"}:
+            kwargs["type"] = collection_list if name == "collections" else csv_list
+            if name == "source_roots":
+                kwargs["default"] = []
+        elif name == "filters":
+            kwargs.update(type=json.loads, default={})
+        elif name in {"confirm", "delete_files", "delete_original_managed_file", "prune_missing"}:
+            kwargs.update(action="store_true", default=False)
+        elif name in {"recursive", "include_text", "include_links", "include_graph_context"}:
+            kwargs.update(action=argparse.BooleanOptionalAction)
+        elif name in {"limit", "depth", "chunk_size_tokens"}:
+            kwargs["type"] = positive
+        elif name in {"offset", "chunk_overlap_tokens"}:
+            kwargs["type"] = nonnegative
+        elif name == "minimum_score":
+            kwargs["type"] = float
+        elif name in {"collection", "name"}:
+            kwargs["type"] = collection_name
+        elif name in {"source_id", "root_id", "job_id", "path", "root", "filename"}:
+            kwargs["type"] = nonempty
+        else:
+            choices = prop.get("enum")
+            if not choices:
+                choices = next((p.get("enum") for p in prop.get("anyOf", []) if p.get("enum")), None)
+            if choices:
+                kwargs["choices"] = choices
+        item.add_argument(option, **kwargs)
+    if op == "corpus_query":
+        item.add_argument(
+            "--numeric", type=numeric, action="append", default=[], help="Repeatable numeric filter."
+        )
     if command in JOBS:
-        item.add_argument("--wait", action="store_true", help="Wait for a daemon job; local jobs always wait")
-    if command in {"remove-source", "get-source"}:
-        item.add_argument("--source-id", type=nonempty, required=True)
-    if command == "remove-source":
-        item.add_argument("--delete-original", action="store_true")
-    if command in {"get-job", "cancel-job", "resume-job"}:
-        item.add_argument("--job-id", type=nonempty, required=True)
-    if command == "get-job":
         item.add_argument(
-            "--watch", action="store_true", help="Emit snapshots every two seconds until stopped"
+            "--wait", action="store_true", help="Wait for a daemon job; direct jobs always wait."
         )
-    if command in {"list-jobs", "list-sources"}:
-        item.add_argument("--status", choices=JOB_STATUSES if command == "list-jobs" else SOURCE_STATUSES)
-    if command in {"list-jobs", "list-sources", "list-keywords"}:
-        item.add_argument("--limit", type=positive, default=50)
-    if command in {"list-sources", "list-keywords"}:
-        item.add_argument("--offset", type=nonnegative, default=0)
-    if command in {"search", "search-multi", "search-knowledge-cards"}:
-        item.add_argument("--query", required=True)
-        item.add_argument("--top-k", type=positive)
+    if op == "scan_job_get":
         item.add_argument(
-            "--mode",
-            choices=["keyword", "vector", "hybrid"]
-            + ([] if command == "search-knowledge-cards" else ["structured"]),
-            default="hybrid",
+            "--watch", action="store_true", help="Print snapshots every two seconds until stopped."
         )
-    if command == "search-multi":
-        item.add_argument("--collections", type=collection_list, required=True)
-    if command == "search-knowledge-cards":
-        item.add_argument("--query-type", choices=["general", "expert"], default="expert")
-        item.add_argument("--minimum-similarity", type=float)
-    if command in {"search", "search-multi"}:
-        item.add_argument("--extensions", type=csv_list, default=[])
-        item.add_argument("--keywords", type=csv_list, default=[])
-        item.add_argument("--source-ids", type=csv_list, default=[])
-        item.add_argument("--path-prefix")
-        item.add_argument("--numeric", type=numeric, action="append", default=[])
-        item.add_argument("--no-text", dest="include_text", action="store_false", default=True)
-        item.add_argument("--no-links", dest="include_links", action="store_false", default=True)
-        item.add_argument("--graph-context", action=argparse.BooleanOptionalAction, default=None)
-    if command == "list-sources":
-        item.add_argument("--extension")
-        item.add_argument("--path-prefix")
-    if command == "list-keywords":
-        item.add_argument("--query")
-    if command == "export-collection-manifest":
-        item.add_argument(
-            "--output", type=nonempty, help="Create a new UTF-8 JSON file; existing files are not overwritten"
-        )
-    if command == "graph":
-        item.add_argument(
-            "--action",
-            choices=["find", "neighbors", "callers", "callees", "dependencies", "inheritance", "impact"],
-            default="neighbors",
-        )
-        selector = item.add_mutually_exclusive_group()
-        selector.add_argument("--symbol")
-        selector.add_argument("--entity-id")
-        item.add_argument("--source-id")
-        item.add_argument("--direction", choices=["outgoing", "incoming", "both"], default="outgoing")
-        item.add_argument("--relationships", type=csv_list)
-        item.add_argument("--depth", type=positive, default=1)
-        item.add_argument("--limit", type=positive, default=50)
+    if op == "collection_export_manifest":
+        item.add_argument("--output", help="Write a new client-local JSON file; refuse overwrite.")
 
 
 def contract(args):
-    """Validated, explicit method/kwargs mapping; no arbitrary method execution."""
-    command = args.command
-    a = vars(args)
-    if command in {"delete-collection", "remove-source", "rebuild-collection"} or (
-        command == "start-scan" and args.prune_missing
-    ):
-        require_confirmation(args.confirm)
-    keys = {
-        "health-status": [],
-        "list-collections": [],
-        "get-collection": ["name"],
-        "create-collection": [
-            "name",
-            "description",
-            "source_roots",
-            "kind",
-            "embedding_model",
-            "chunk_size_tokens",
-            "chunk_overlap_tokens",
-        ],
-        "update-collection-config": ["name", "description"],
-        "delete-collection": ["name", "confirm", "delete_files"],
-        "list-source-roots": ["collection"],
-        "add-source-root": ["collection", "path", "recursive"],
-        "remove-source-root": ["collection", "root_id"],
-        "start-scan": ["collection", "root", "recursive", "prune_missing"],
-        "add-file": ["collection", "path"],
-        "remove-source": ["collection", "source_id", "confirm"],
-        "get-job": ["collection", "job_id"],
-        "list-jobs": ["collection", "status", "limit"],
-        "cancel-job": ["job_id"],
-        "resume-job": ["collection", "job_id"],
-        "list-sources": ["collection", "extension", "path_prefix", "status", "limit", "offset"],
-        "get-source": ["collection", "source_id"],
-        "list-keywords": ["collection", "query", "limit", "offset"],
-        "list-metadata-fields": ["collection"],
-        "export-collection-manifest": ["collection"],
-        "rebuild-collection": ["collection", "confirm"],
-        "vacuum-collection": ["collection"],
-        "graph": [
-            "collection",
-            "action",
-            "symbol",
-            "entity_id",
-            "source_id",
-            "direction",
-            "relationships",
-            "depth",
-            "limit",
-        ],
-        "search-knowledge-cards": [
-            "collection",
-            "query",
-            "query_type",
-            "mode",
-            "top_k",
-            "minimum_similarity",
-        ],
-    }
-    if command in {"search", "search-multi"}:
-        data = {k: a[k] for k in ("query", "mode", "top_k", "include_text", "include_links")}
-        data.update(
-            format="llm" if args.format == "llm" else "raw",
-            include_graph_context=args.graph_context,
-            filters=SearchFilters(
-                source_extensions=args.extensions,
-                keywords=args.keywords,
-                source_ids=args.source_ids,
-                path_prefix=args.path_prefix,
-                numeric=args.numeric,
-            ),
-        )
-        if command == "search":
-            request = SearchRequest(collection=args.collection, **data)
-        else:
-            for value in args.collections:
-                name(value)
-            request = MultiSearchRequest(collections=args.collections, **data)
-        return command.replace("-", "_"), {"request": request}
-    data = {k: a[k] for k in keys[command]}
-    if command == "create-collection":
-        return "create_collection", {"request": CreateCollection(**data)}
-    if command == "graph":
-        data["format"] = "llm" if args.format == "llm" else "raw"
-        return "graph", {"request": GraphRequest(**data)}
-    if command == "search-knowledge-cards":
-        return "search_knowledge_cards", {"request": KnowledgeCardSearchRequest(**data)}
-    if command == "remove-source":
-        data["delete_original_managed_file"] = args.delete_original
-    return command.replace("-", "_"), data
+    op = args.command.replace("-", "_")
+    values = {key: getattr(args, key) for key in OPERATIONS[op].model.model_fields}
+    if values.get("format") == "table":
+        values["format"] = "raw"
+    if op == "corpus_query":
+        values["filters"] = dict(values["filters"])
+        values["filters"]["numeric"] = values["filters"].get("numeric", []) + [
+            v.model_dump(by_alias=True) for v in args.numeric
+        ]
+    return op, validate(op, values).model_dump()
 
 
 def clean(value):
@@ -329,7 +158,7 @@ def clean(value):
 def table(command, payload):
     diagnostics = []
     if isinstance(payload, dict):
-        for key in ("collections_failed", "skipped_filters"):
+        for key in ("warnings", "collections_failed", "skipped_filters"):
             if payload.get(key):
                 diagnostics.append(key + ": " + clean(payload[key]))
     rows = (
@@ -347,14 +176,19 @@ def table(command, payload):
         )
     if not rows:
         return "\n".join(["(no rows)", *diagnostics])
-    columns = {
-        "list-collections": ["name", "kind", "counts", "embedding", "chunking"],
-        "list-sources": ["id", "original_filename", "extension", "status"],
-        "list-jobs": ["id", "kind", "status", "progress"],
-        "list-keywords": ["canonical_form", "chunk_frequency"],
-        "search": ["score", "source_filename", "citation_label", "text"],
-        "search-multi": ["collection_id", "score", "source_filename", "citation_label", "text"],
-    }.get(command, list(rows[0]))
+    if command == "corpus-query":
+        rows = [
+            {
+                "rank": r["rank"],
+                "collection": r["collection"],
+                "kind": r["kind"],
+                "title": r["title"],
+                "score": r["relevance"]["score"],
+                "content": r["content"],
+            }
+            for r in rows
+        ]
+    columns = list(rows[0])
     data = [[clean(row.get(k, "")) for k in columns] for row in rows]
     widths = [min(80, max(len(k), *(len(row[i]) for row in data))) for i, k in enumerate(columns)]
 
@@ -363,18 +197,17 @@ def table(command, payload):
             (v if len(v) <= w else v[: w - 3] + "...").ljust(w) for v, w in zip(values, widths, strict=True)
         )
 
-    output = [line(columns), "-+-".join("-" * w for w in widths), *[line(row) for row in data]]
-    output.extend(diagnostics)
-    return "\n".join(output)
+    return "\n".join([line(columns), "-+-".join("-" * w for w in widths), *map(line, data), *diagnostics])
 
 
 def emit(args, payload, snapshot=False):
-    if isinstance(payload, str):
-        output = payload
-    elif args.format == "table":
-        output = table(args.command, payload)
-    else:
-        output = json.dumps(payload, ensure_ascii=False, indent=None if snapshot else 2, allow_nan=False)
+    output = (
+        payload
+        if isinstance(payload, str)
+        else table(args.command, payload)
+        if args.format == "table"
+        else (json.dumps(payload, ensure_ascii=False, indent=None if snapshot else 2, allow_nan=False))
+    )
     if getattr(args, "output", None):
         with Path(args.output).expanduser().open("x", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
@@ -384,7 +217,7 @@ def emit(args, payload, snapshot=False):
 
 def exit_status(args, payload):
     if isinstance(payload, dict):
-        if args.command in JOBS | {"get-job"} and payload.get("status") in {
+        if args.command in JOBS | {"scan-job-get"} and payload.get("status") in {
             "failed",
             "completed_with_errors",
             "cancelled",
@@ -392,8 +225,8 @@ def exit_status(args, payload):
         }:
             return 3
         if (
-            args.command == "search-multi"
-            and payload.get("collections_failed")
+            args.command == "corpus-query"
+            and payload.get("warnings")
             and not payload.get("collections_searched")
         ):
             return 3
@@ -417,64 +250,20 @@ async def wait_job(args, getter, job, task=None, watch=False):
 
 
 async def local(engine, args, method, kwargs):
-    result = getattr(engine, method)(**kwargs)
-    if inspect.isawaitable(result):
-        result = await result
+    result = await invoke(engine, method, kwargs)
 
     async def getter(job_id):
-        return engine.get_job(args.collection, job_id)
+        return engine.scan_job_get(args.collection, job_id)
 
     if args.command in JOBS:
-        result = await wait_job(args, getter, result, engine.tasks.get(result["id"]))
-    elif args.command == "get-job" and args.watch:
-        result = await wait_job(args, getter, result, watch=True)
+        return await wait_job(args, getter, result, engine.tasks.get(result["id"]))
+    if args.command == "scan-job-get" and args.watch:
+        return await wait_job(args, getter, result, watch=True)
     return result
 
 
 def endpoint(args, kwargs):
-    c = "/api/collections/" + quote(getattr(args, "collection", None) or getattr(args, "name", ""), safe="")
-    command = args.command
-    body = {
-        k: v
-        for k, v in kwargs.items()
-        if k not in {"collection", "name", "root_id", "source_id", "job_id"} and v is not None
-    }
-    params = {}
-    routes = {
-        "health-status": ("GET", "/api/health"),
-        "list-collections": ("GET", "/api/collections"),
-        "get-collection": ("GET", c),
-        "create-collection": ("POST", "/api/collections"),
-        "update-collection-config": ("PATCH", c),
-        "delete-collection": ("DELETE", c),
-        "list-source-roots": ("GET", c + "/roots"),
-        "add-source-root": ("POST", c + "/roots"),
-        "remove-source-root": ("DELETE", c + "/roots/" + quote(getattr(args, "root_id", ""), safe="")),
-        "start-scan": ("POST", c + "/scan"),
-        "add-file": ("POST", c + "/add_file"),
-        "remove-source": ("DELETE", c + "/sources/" + quote(getattr(args, "source_id", "") or "", safe="")),
-        "get-source": ("GET", c + "/sources/" + quote(getattr(args, "source_id", "") or "", safe="")),
-        "list-sources": ("GET", c + "/sources"),
-        "list-jobs": ("GET", c + "/jobs"),
-        "get-job": ("GET", c + "/jobs/" + quote(getattr(args, "job_id", ""), safe="")),
-        "resume-job": ("POST", c + "/jobs/" + quote(getattr(args, "job_id", ""), safe="") + "/resume"),
-        "cancel-job": ("POST", "/api/jobs/" + quote(getattr(args, "job_id", ""), safe="") + "/cancel"),
-        "list-keywords": ("GET", c + "/keywords"),
-        "list-metadata-fields": ("GET", c + "/metadata_fields"),
-        "export-collection-manifest": ("GET", c + "/manifest"),
-        "rebuild-collection": ("POST", c + "/rebuild"),
-        "vacuum-collection": ("POST", c + "/vacuum"),
-        "search": ("POST", "/api/search"),
-        "search-multi": ("POST", "/api/search/multi"),
-        "graph": ("POST", "/api/corpus/graph"),
-        "search-knowledge-cards": ("POST", "/api/knowledge-cards/search"),
-    }
-    verb, path = routes[command]
-    if "request" in kwargs:
-        body = kwargs["request"].model_dump(by_alias=True)
-    if verb in {"GET", "DELETE"}:
-        params, body = body, None
-    return verb, path, params, body
+    return "POST", "/api/" + args.command, {}, kwargs
 
 
 async def remote(args, kwargs):
@@ -494,12 +283,14 @@ async def remote(args, kwargs):
     ):
         raise RagError(
             "CONFIG_INVALID",
-            "--server-url requires HTTPS or loopback HTTP, without embedded credentials/query/fragment",
+            "--server-url requires HTTPS or loopback HTTP without credentials/query/fragment",
         )
     token = os.environ.get("RAGDBMAN_AUTH_TOKEN")
-    headers = {"Authorization": "Bearer " + token} if token else {}
     async with httpx.AsyncClient(
-        headers=headers, timeout=args.timeout, follow_redirects=False, trust_env=False
+        headers={"Authorization": "Bearer " + token} if token else {},
+        timeout=args.timeout,
+        follow_redirects=False,
+        trust_env=False,
     ) as client:
 
         async def request(verb, path, params=None, body=None):
@@ -522,22 +313,21 @@ async def remote(args, kwargs):
                     payload.get("code", "REMOTE_ERROR"),
                     payload.get("message", f"Daemon returned HTTP {response.status_code}"),
                 )
-            if response.headers.get("content-type", "").startswith("text/plain"):
-                return response.text
-            return response.json()
+            return (
+                response.text
+                if response.headers.get("content-type", "").startswith("text/plain")
+                else response.json()
+            )
 
         result = await request(*endpoint(args, kwargs))
 
         async def getter(job_id):
             return await request(
-                "GET",
-                "/api/collections/" + quote(args.collection, safe="") + "/jobs/" + quote(job_id, safe=""),
+                "POST", "/api/scan-job-get", body={"collection": args.collection, "job_id": job_id}
             )
 
         if args.command in JOBS and args.wait:
-            result = await wait_job(args, getter, result)
-        elif args.command == "get-job" and args.watch:
-            result = await wait_job(args, getter, result, watch=True)
-        if args.command == "search-knowledge-cards":
-            result = [{k: v for k, v in row.items() if k != "yaml"} for row in result["results"]]
+            return await wait_job(args, getter, result)
+        if args.command == "scan-job-get" and args.watch:
+            return await wait_job(args, getter, result, watch=True)
         return result

@@ -79,12 +79,12 @@ async def scan(concurrency):
         )
         engine = Engine(cfg, DelayedEmbedder())
         try:
-            await engine.create_collection(name="code", kind="source_code")
+            await engine.collection_create(name="code", kind="source_code")
             start = time.perf_counter()
-            job = engine.start_scan("code", str(sources))
+            job = engine.scan_start("code", str(sources))
             await engine.tasks[job["id"]]
             elapsed = time.perf_counter() - start
-            final = engine.get_job("code", job["id"])
+            final = engine.scan_job_get("code", job["id"])
             assert final["progress"]["completed"] == 32
             return dict(seconds=round(elapsed, 4), files=32, concurrency=concurrency)
         finally:

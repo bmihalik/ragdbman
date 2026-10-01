@@ -16,6 +16,8 @@ AI-assisted implementation work.
   Supplied the CLI extension specification and Python API guide used for the
   implementation and documentation work. Requested the repository consistency
   review and more explanatory command-line help delivered in 0.5.4.
+  Defined the unified canonical naming requirements and authorized the breaking
+  interface simplification delivered in 0.6.0.
 - **Technical and product direction:** Made the final decisions on technology,
   community focus, optional PDF backends, external-tool integration, and
   Apache-2.0 licensing; reviewed proposals and requested refinements.
@@ -41,6 +43,8 @@ AI-assisted implementation work.
   configuration, and license notices at the project owner's direction.
   Performed the 0.5.4 source/documentation consistency review and generated
   executable drift checks and expanded command help under that direction.
+  Implemented the 0.6.0 shared operation catalog, transport alignment,
+  browser integration and cross-interface tests under the owner's naming requirements.
 
 ## Scope of these credits
 

@@ -140,8 +140,8 @@ Numeric facts are only extracted from explicit supported labels. Unrelated numbe
 
 ## Service interfaces
 
-The CLI exposes 31 explicit commands: four infrastructure commands, the 25
-specified engine-service commands, and graph/card search. It supports validated
+The CLI exposes 31 commands: three setup commands and 28 canonical operations.
+One corpus query covers all collection kinds and scopes. It supports validated
 flags, repeated numeric filters, JSON/table output, readable search output,
 manifest export, and two-second job watching. Direct jobs retain their engine
 until stopped; optional daemon transport uses existing administrative REST.
@@ -158,13 +158,13 @@ uncertainty, and does not synthesize summaries or change retrieval.
 See [output formats](docs/OUTPUT_FORMATS.md).
 
 The service provides three operational MCP tools (`corpus_describe`, `corpus_query`, `corpus_graph`)
-and three additional tools on the separately authorized admin profile
-(`corpus_manage`, `corpus_ingest`, `corpus_job`). The admin profile can be disabled
+and the full canonical catalog on the separately authorized admin profile.
+See [INTERFACES.md](docs/INTERFACES.md) for exact names. The admin profile can be disabled
 without disabling web administration. Distinct tokens and middleware enforce the
 boundary across MCP and REST; query access also supports a collection allowlist.
 The admin UI retains collection creation, model/chunk overrides, roots/scans,
 uploads, source inspection, jobs/SSE, search, manifests, vacuum, rebuild and
-confirmed deletion. Specialized REST routes remain available to administrators.
+confirmed deletion. REST uses one named POST endpoint per canonical operation.
 
 Search now exposes raw/LLM output and source graph-context options. A read-only
 graph explorer supports candidate discovery, exact-ID follow-up, callers/callees,

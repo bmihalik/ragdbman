@@ -21,6 +21,8 @@ from ragdbman.cli_help import COMMAND_HELP
 from ragdbman.config import GlobalConfig
 from ragdbman.engine import Engine
 from ragdbman.errors import STATUS
+from ragdbman.operations import OPERATIONS
+from ragdbman.web import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = sorted([*ROOT.glob("*.md"), *(ROOT / "docs").glob("*.md")])
@@ -35,7 +37,7 @@ def test_cli_catalog_and_all_option_explanations():
     assert (
         set(commands)
         == set(COMMAND_HELP)
-        == {"serve", "init", "registry-repair", "fetch-tokenizer", *COMMANDS}
+        == {"serve", "init", "collections-registry-repair", "fetch-tokenizer", *COMMANDS}
     )
     for name, command in commands.items():
         assert len(command.description) > 100, name
@@ -74,31 +76,18 @@ def test_document_relative_links_exist(path):
             assert (path.parent / target_path).exists(), (path.relative_to(ROOT), target)
 
 
-def test_documented_rest_routes_match_source():
-    tree = ast.parse((ROOT / "src/ragdbman/web.py").read_text(encoding="utf-8"))
-    actual = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        for decorator in node.decorator_list:
-            if (
-                isinstance(decorator, ast.Call)
-                and isinstance(decorator.func, ast.Attribute)
-                and isinstance(decorator.func.value, ast.Name)
-                and decorator.func.value.id == "app"
-                and decorator.func.attr in {"get", "post", "patch", "delete"}
-                and decorator.args
-                and isinstance(decorator.args[0], ast.Constant)
-            ):
-                route = decorator.args[0].value
-                if route.startswith("/api/") or route.endswith("/events"):
-                    actual.add((decorator.func.attr.upper(), route))
-    documented = set()
-    for line in (ROOT / "docs/API.md").read_text().splitlines():
-        match = re.match(r"\| ([A-Z /]+) \| `([^`]+)` \|", line)
-        if match:
-            documented.update((method.strip(), match[2]) for method in match[1].split("/"))
-    assert documented == actual
+async def test_documented_rest_routes_match_source(engine):
+    app = create_app(engine, False)
+    actual = {path for path in app.openapi()["paths"] if path.startswith("/api/")}
+    documented = set(re.findall(r"`(/api/[\w-]+)`", (ROOT / "docs/INTERFACES.md").read_text()))
+    assert actual == documented == {"/api/" + name.replace("_", "-") for name in OPERATIONS}
+
+
+def test_generated_interface_reference_is_current():
+    import runpy
+
+    generator = runpy.run_path(str(ROOT / "tools/generate_interface_reference.py"))
+    assert generator["render"]() == (ROOT / "docs/INTERFACES.md").read_text(encoding="utf-8")
 
 
 def test_python_guide_engine_calls_match_signatures():

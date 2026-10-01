@@ -10,21 +10,20 @@ summary-generation step, retrieval pass or graph search mode.
 | Surface | Default | Selecting a format |
 | --- | --- | --- |
 | MCP `corpus_query` | `llm` | Top-level `format` argument |
-| MCP `corpus_graph` | `llm` | `request.format` |
-| REST `/api/corpus/query` | `raw` | JSON body `format` |
-| REST `/api/corpus/graph` | `raw` | JSON body `format` |
-| REST `/api/search`, `/api/search/multi` | `raw` | JSON body `format` |
-| Python `CorpusQuery`, `GraphRequest`, `SearchRequest`, `MultiSearchRequest` | `raw` | Model field `format` |
+| MCP `corpus_graph` | `llm` | Top-level `format` |
+| REST `/api/corpus-query` | `raw` | JSON body `format` |
+| REST `/api/corpus-graph` | `raw` | JSON body `format` |
+| Python `CorpusQuery`, `GraphRequest` | `raw` | Model field `format` |
+| CLI corpus-query / corpus-graph | `raw` | `--format raw`, `llm` or local `table` |
 
 Only `raw` and `llm` are accepted, case-sensitively. Null and unknown values are
 validation errors. The MCP graph request schema uses a specialized default;
 the ordinary Python/REST `GraphRequest` remains raw by default.
 
 There is no new `corpus_search` alias. The unified search tool remains
-`corpus_query`; query/admin profiles still expose three/six tools. Discovery
-and management tool formats are unchanged. The legacy specialized Knowledge
-Cards REST route retains its existing JSON/YAML envelope; use the unified
-corpus route to select a presentation for cards. The web UI defaults to raw
+`corpus_query`; query/admin profiles expose three/28 tools. Discovery
+and named management operations use raw payloads. Knowledge Cards use the same
+corpus route and content envelope as other collection kinds. The web UI defaults to raw
 output and now offers a Raw JSON/LLM text selector, graph-context controls,
 and graph traversal. See [WEB_UI.md](WEB_UI.md) for the card endpoint mappings.
 
@@ -116,7 +115,7 @@ nested entity dictionaries.
 One intentional exception: `find` and ambiguous selection responses include an
 `entity_id` beside each candidate so the next tool call can select it exactly.
 These are navigation handles, not repeated provenance metadata. Choose
-`request.format="raw"` whenever full structured graph data is needed.
+`format="raw"` whenever full structured graph data is needed.
 
 ## Operational guarantees
 

@@ -15,13 +15,13 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 `tests/test_repo_consistency.py` makes cross-surface drift executable. It checks
 that all 31 CLI commands have detailed descriptions/examples, every option has
-nontrivial help, examples parse, 27 service contracts bind to their Engine
-signatures, relative Markdown links resolve, API.md matches implemented REST
+nontrivial help, examples parse, 28 service contracts bind to their Engine
+signatures, relative Markdown links resolve, the generated reference matches REST
 routes, and direct Engine calls in the Python guide bind to current signatures.
 It also covers empty-result table diagnostics.
 
 `tests/test_mcp_capabilities.py` contains 24 cases covering actual initialization
-capabilities on both profiles, unchanged tool counts and usable discovery,
+capabilities on both profiles, catalog-matched tool counts and usable discovery,
 unsupported prompt/resource/template/subscription methods, serial/concurrent
 stateless pings, expected teardown without ERROR logs, unexpected closure with
 ERROR logs retained, source/lock/installed-package dependency requirements,
@@ -33,7 +33,7 @@ pages. Optional `browser_search_graph.mjs` covers formats, graph controls,
 selection, error/disabled/empty states, escaping, copying and mobile width;
 `browser_job_record.mjs` retains the stable-inspector regression.
 
-`tests/test_cli_commands.py` adds 59 CLI contract and workflow cases, including
+`tests/test_cli_commands.py` contains 60 CLI contract and workflow cases, including
 actual foreground and daemon subprocesses, cancellation/resume, ownership
 contention, watch output, confirmations, filters, table escaping and manifests.
 See [CLI.md](CLI.md) for supported execution modes and limits.
@@ -59,7 +59,8 @@ compatibility with every real document, external tool version, or deployment.
 | Overview HTTP requests during blocked scan stages, cancellation rollback, shutdown cleanup, bounded health checks | `test_responsiveness.py` |
 | YAML validation, field embeddings, confidence formulas/fallback, duplicates, replacement, rebuild/pruning, restart, MCP/REST and responsive parsing | `test_knowledge_cards.py` |
 | Same-named launcher collisions, source-qualified resources, import guards, CLI invocation and local environment selection | `test_launcher.py` |
-| Three/six-tool MCP profiles, transport authorization, REST bypass denial, scoped discovery, unified queries, action validation and card rendering | `test_corpus.py` |
+| Query/admin MCP profiles, transport authorization, REST bypass denial, scoped discovery, unified queries, canonical operation validation and card rendering | `test_corpus.py` |
+| Canonical names, removed aliases, flat schemas, API/MCP/Python/CLI parity, confirmations and strict arguments | `test_canonical_interfaces.py` |
 | Tools-only capability discovery, unsupported protocol methods, stateless teardown and SDK dependency requirements | `test_mcp_capabilities.py` |
 | Citation/CodeMeta identity, author, license, release-version consistency and wheel inclusion plan | `test_release_metadata.py` |
 | Total/processed counts, percentage, ETA, empty scans, cancellation/resume and downtime-safe recovery | `test_scan_progress.py` |

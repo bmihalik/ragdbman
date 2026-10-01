@@ -14,15 +14,15 @@ from ragdbman.extract.sniff import SAMPLE_BYTES, is_text_file, text_content
     "name", ["Kconfig", "LICENSE", "sdkconfig.defaults", "config.board", "README", "script"]
 )
 async def test_unrecognized_source_names_index_as_text(engine, source_dir, name):
-    await engine.create_collection(name="code", kind="source_code")
+    await engine.collection_create(name="code", kind="source_code")
     path = source_dir / name
     path.write_text("# Build configuration\nCONFIG_BOARD=example\n# Copyright © 2026\n")
-    result = await engine.add_file("code", str(path))
+    result = await engine.collection_add_file("code", str(path))
     assert result["chunks"] > 0 and not result["skipped"]
-    source = engine.get_source("code", result["source_id"])
+    source = engine.collection_get_file("code", result["source_id"])
     assert source["status"] == "indexed" and source["markdown_path"] is None
     assert not list(source_dir.rglob(".ragdbman"))
-    same = await engine.add_file("code", str(path))
+    same = await engine.collection_add_file("code", str(path))
     assert same["classification"] == "unchanged"
 
 
@@ -60,33 +60,33 @@ def test_probe_handles_split_multibyte_boundary(tmp_path):
 
 
 async def test_binary_tail_is_skipped_not_embedded(engine, source_dir):
-    await engine.create_collection(name="code", kind="source_code")
+    await engine.collection_create(name="code", kind="source_code")
     path = source_dir / "misleading"
     path.write_bytes(b"A" * SAMPLE_BYTES + b"\0\1binary tail")
     assert is_text_file(path)  # The complete extraction validation must still reject it.
     before = len(engine.embedder.calls)
-    result = await engine.add_file("code", str(path))
+    result = await engine.collection_add_file("code", str(path))
     assert result["skipped"]
     assert len(engine.embedder.calls) == before
-    assert engine.get_source("code", result["source_id"])["status"] == "unsupported"
-    assert engine.get_collection("code")["counts"]["chunks"] == 0
+    assert engine.collection_get_file("code", result["source_id"])["status"] == "unsupported"
+    assert engine.collection_get("code")["counts"]["chunks"] == 0
 
 
 async def test_general_collection_policy_unchanged(engine, source_dir):
-    await engine.create_collection(name="general")
+    await engine.collection_create(name="general")
     path = source_dir / "Kconfig"
     path.write_text("CONFIG_FEATURE=y\n")
-    assert (await engine.add_file("general", str(path)))["skipped"]
+    assert (await engine.collection_add_file("general", str(path)))["skipped"]
 
 
 async def test_rescan_retries_previously_skipped_sources(engine, source_dir):
-    await engine.create_collection(name="code", kind="source_code")
+    await engine.collection_create(name="code", kind="source_code")
     path = source_dir / "LICENSE"
     path.write_bytes(b"\0binary")
-    first = await finish(engine, "code", engine.start_scan("code", str(source_dir)))
+    first = await finish(engine, "code", engine.scan_start("code", str(source_dir)))
     assert first["progress"]["skipped"] == 1
     path.write_text("Permission is hereby granted.\n")
-    second = await finish(engine, "code", engine.start_scan("code", str(source_dir)))
+    second = await finish(engine, "code", engine.scan_start("code", str(source_dir)))
     assert second["progress"]["completed"] == 1
     assert second["progress"]["skipped"] == 0
 

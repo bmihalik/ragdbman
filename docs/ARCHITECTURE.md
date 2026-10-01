@@ -15,8 +15,9 @@ private-SDK compatibility boundary. The dependency is `mcp>=1.30.0,<2`, with
 updates must rerun discovery and teardown tests; ragdbman does not monkeypatch
 the SDK transport or silence its error logger.
 
-The MCP boundary is implemented in `mcp_server.py`, with read-only contracts in
-`corpus.py` and discriminated management actions in `corpus_admin.py`. Query and
+The MCP boundary is implemented in `mcp_server.py`, with retrieval in
+`corpus.py` and canonical models/dispatch in `operations.py`. CLI, MCP and REST
+registrations are generated from that catalog. Query and
 admin transports use separate tool registries/session managers and share
 server-side authentication in `web.py`; the query registry never contains a
 mutation tool. Credential enforcement covers administrative REST/UI routes as
@@ -115,7 +116,7 @@ resource usage: large jobs can still compete for CPU, memory and disk. Large
 searches and explicit maintenance operations still need scale-focused profiling.
 
 One mutating job owns each collection; it runs a bounded TaskGroup of file
-pipelines with a semaphore. A repeated start-scan call returns the active scan.
+pipelines with a semaphore. A repeated scan-start call returns the active scan.
 Distinct canonical paths may complete out of input order. Thread-safe cancellation flags are checked during index
 writes and before commit, so cancelled writes roll back. Cancellation waits for
 worker cleanup before releasing the collection lock; it cannot leave a detached
@@ -135,8 +136,8 @@ deadline, including time waiting for an embedding request slot.
 ## Retrieval path
 
 Format selection happens in the shared service rather than in a client.
-REST/Python request models default to raw dictionaries; MCP query defaults and
-its specialized graph request default to readable strings. The MCP adapter
+REST/Python request models default to raw dictionaries; MCP query and graph
+signatures apply readable-string defaults over the same request fields. The MCP adapter
 emits either structured JSON or text-only content, while REST converts strings
 to UTF-8 plain-text responses. Formatting does not call retrieval again or
 perform summarization. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).

@@ -124,6 +124,10 @@ retained in the schema, not advertised as active behavior.
 
 Under `[search]`, defaults are `default_top_k=8`, `max_top_k=50`, `vector_weight=0.65`, `keyword_weight=0.35`, `rrf_k=60`, and `return_context_chars_per_chunk=2400`. Requested result counts are capped at `max_top_k`.
 
+The public `corpus_query` contract has a single global `limit=5` default across
+CLI/Python/REST/MCP. `default_top_k` is retained for internal retrieval helpers;
+it does not override the public corpus limit. Use the explicit request `limit`.
+
 Hybrid scoring uses each channel's rank with the configured weight. Multi-collection scoring uses independent collection ranks to avoid comparing different model distance scales directly.
 
 ## Optional converters

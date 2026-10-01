@@ -199,8 +199,8 @@ def test_transaction_rollback():
 
 
 async def test_registry_repair_from_db(engine, cfg):
-    collection = await engine.create_collection(name="restore")
+    collection = await engine.collection_create(name="restore")
     Path(cfg.storage.registry_path).write_text("{corrupt")
-    result = engine.repair_registry()
+    result = engine.collections_registry_repair()
     assert result[0]["id"] == collection["id"]
     assert json.loads(Path(cfg.storage.registry_path).read_text())["schema_version"] == 1

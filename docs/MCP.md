@@ -1,366 +1,132 @@
-# The corpus MCP interface
+# MCP interface
 
-ragdbman exposes one small operational interface for all collection kinds, with
-administration available on a separate, optional endpoint. Both endpoints use
-stateless MCP Streamable HTTP with the official SDK.
+MCP exposes the same underscore operation names as the Python Engine API.
+The CLI and REST use the corresponding hyphenated spelling. Schemas are
+generated from the shared catalog, documented in [INTERFACES.md](INTERFACES.md).
 
-## Tools-only discovery and SDK requirement
+## Profiles and credentials
 
-Version 0.5.3 requires `mcp>=1.30.0,<2`; `uv.lock` selects 1.30.0. Both profiles
-advertise tools but omit `prompts` and `resources` from the initialization
-capabilities. They do not register handlers for prompt listing/retrieval,
-resource listing/reading, resource templates or resource subscriptions.
-Requests for those methods return JSON-RPC error `-32601` (Method Not Found).
-The three query tools and six admin tools below are unchanged.
-
-This is an explicit boundary around FastMCP's default registration of empty
-prompt/resource managers, not a new retrieval interface; the upstream behavior
-is visible in [FastMCP 1.30.0](https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/v1.30.0/src/mcp/server/fastmcp/server.py).
-No database changes, rescanning or re-embedding are needed for this patch.
-
-### Applying the patch
-
-Stop the existing daemon before replacing its source and installing dependencies.
-From the release directory, use the isolated locked environment:
-
-```sh
-uv sync --locked
-uv run --locked ragdbman serve
-```
-
-If you use optional extras, preserve them in both commands, for example
-`uv sync --locked --extra pymupdf` and
-`uv run --locked --extra pymupdf ragdbman serve`. Do not assume an old daemon
-loading packages from `~/.local` is using the project's lockfile.
-Check the selected SDK with:
-
-```sh
-uv run --locked python -c 'from importlib.metadata import version; print(version("ragdbman"), version("mcp"))'
-```
-
-Reconnect the MCP client to refresh its cached initialization capabilities.
-Hermes supports `/reload-mcp` or a restart and can expose prompt/resource
-operations as client-side tool wrappers; those are not ragdbman's `corpus_`
-tools ([Hermes MCP configuration](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/)).
-For older or non-capability-aware Hermes installations, explicitly disable
-the utility wrappers by merging this fragment into the existing server entry,
-preserving its URL and authentication settings:
-
-```yaml
-mcp_servers:
-  ragdbman:
-    tools:
-      resources: false
-      prompts: false
-```
-
-These utility switches are documented in the
-[Hermes MCP configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference/).
-The server cannot delete tool definitions already cached by a client.
-
-### Stateless teardown logs
-
-`Terminating session: None` can remain an ordinary INFO message for this
-stateless transport. SDK 1.30.0 handles a closed read stream after termination
-at DEBUG while retaining ERROR logging for unexpected closure, as shown in
-the [SDK transport implementation](https://raw.githubusercontent.com/modelcontextprotocol/python-sdk/v1.30.0/src/mcp/server/streamable_http.py).
-ragdbman does not suppress all `ClosedResourceError` exceptions or filter
-transport ERROR logs. An unexpected closure still needs investigation; an
-HTTP 200 status alone does not prove that the JSON-RPC operation succeeded.
-
-## Profiles and authentication
-
-| Profile | Endpoint | Exposed tools |
+| Profile | Endpoint | Tools |
 | --- | --- | --- |
 | Query | `/mcp/query` | `corpus_describe`, `corpus_query`, `corpus_graph` |
-| Admin | `/mcp/admin` | All three query tools plus `corpus_manage`, `corpus_ingest`, `corpus_job` |
+| Admin | `/mcp/admin` | All 28 canonical operations |
 
-### Explicit tool annotations
+The admin endpoint is disabled by default and returns HTTP 404 while disabled.
+Enable `server.mcp_admin_enabled=true` to expose it. Web/REST administration
+remains available independently. `server.mcp_path` changes the common prefix.
+The bare prefix exposes no tools.
 
-Every tool decorator declares all four boolean hints explicitly; `tools/list`
-serializes the values below on both profiles. None relies on omitted SDK defaults
-or a shared annotation variable that a static source checker might not resolve.
+Set `RAGDBMAN_AUTH_TOKEN` for administrators and a distinct
+`RAGDBMAN_QUERY_TOKEN` for query-only agents. Use `Authorization: Bearer TOKEN`.
+MCP always requires authorization, including on loopback. Configuring a query
+token or enabling admin MCP requires an admin secret; equal secrets are rejected.
+The admin token can access the query endpoint but does not expand that endpoint's
+tool set or collection allowlist. Query tokens never authorize admin REST/UI.
 
-| Tool | readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
-| --- | --- | --- | --- | --- |
-| `corpus_describe` | true | false | true | false |
-| `corpus_query` | true | false | true | false |
-| `corpus_graph` | true | false | true | false |
-| `corpus_manage` | false | true | false | false |
-| `corpus_ingest` | false | true | false | false |
-| `corpus_job` | false | true | false | false |
+Credentials and profile enablement are read at app creation; restart after changes.
+Do not put tokens in URLs or version-controlled configuration. Remote access
+requires appropriate authentication, TLS/proxy and firewall controls.
 
-Read-only tools do not mutate the corpus; idempotence concerns effects, not
-a promise of identical results while another process changes the indexed data.
-Administrative hints conservatively describe the whole action-dispatch tool:
-manage can delete, ingest can replace/prune/rebuild, and job can cancel or resume
-work that replaces indexed state. Read-only sub-actions do not make those tools
-read-only, and retries are not guaranteed to have no additional effect.
-
-`openWorldHint=false` describes the bounded corpus, authorized source paths,
-jobs and operator-configured processing services. These are not arbitrary
-web-search, URL-fetch or external-message tools. It is not an air-gap guarantee:
-configured Ollama endpoints, model/tokenizer downloads and external converters
-can use the network. Retrieved content must still be treated as untrusted.
-
-Annotations are descriptive hints, not access controls or confirmation enforcement,
-as explained by the [MCP maintainers](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/).
-The existing token scopes, path guards and explicit destructive-action confirmations
-remain authoritative; completing these fields alone does not certify directory
-acceptance or a particular third-party scanner result.
-
-### Credentials and endpoint scope
-
-The endpoint prefix is configurable with `server.mcp_path`. Admin MCP is disabled
-by default and returns HTTP 404 while disabled. The bare prefix exposes no tools.
-The web interface remains capable of administration independently.
-
-Set two distinct secrets in the daemon environment:
-
-```sh
-export RAGDBMAN_AUTH_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export RAGDBMAN_QUERY_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-uv run --locked ragdbman serve
-```
-
-Store stable secrets securely for normal operation; generating them again changes
-the client credentials. For systemd, use a protected EnvironmentFile as shown in
-`deploy/ragdbman.service`. Never commit secrets to TOML or source control.
-
-- Query agents send `Authorization: Bearer <query token>` to `/mcp/query`.
-- Administrators send `Authorization: Bearer <admin token>` to `/mcp/admin`.
-- The admin token can also use the query endpoint, but that endpoint still has
-  only three read-only tools and applies the query-profile collection allowlist.
-- The admin profile can inspect/query every collection. Never give its token to
-  an agent intended to have query-only access.
-- Query tokens cannot access any web/REST route or the admin MCP endpoint.
-- MCP requests without authorized Bearer credentials are rejected, even locally.
-- Setting a query token or enabling admin MCP requires an administrator secret;
-  equal secrets are rejected at startup. Any configured administrator secret
-  protects web/REST administration even when `web_auth_mode="local"`.
-- For the browser, use any username and the admin token as the Basic-auth password
-  in `password` mode or protected local mode. In `oauth_proxy` mode use the
-  configured authenticated proxy.
-
-With no MCP credentials configured and local web mode, the loopback web UI
-remains a trusted standalone administrator interface, while anonymous MCP is
-unavailable. Authentication does not protect against an actor that can read the
-daemon's secrets, alter its configuration or access its operating-system account.
-Remote deployments still require TLS/proxy/firewall controls.
-
-Credentials are snapshotted at app creation. Restart after changing credentials,
-profile enablement or collection permissions; there is no request-controlled role.
-
-## Default scope and collection permissions
-
-Example TOML:
+## Collection scope
 
 ```toml
 [server]
 mcp_path = "/mcp"
 mcp_admin_enabled = false
-mcp_default_collections = ["programming", "engineering"]
-mcp_allowed_collections = ["programming", "engineering", "manuals"]
+mcp_default_collections = ["books"]
+mcp_allowed_collections = ["books", "code"]
 ```
 
-`mcp_default_collections=[]` requires explicit selection in `corpus_query`.
-Omitting a query's `collections` never means “search every collection.”
-`mcp_allowed_collections` omitted permits explicitly selected access to all
-collections; setting it to `[]` permits none. Defaults must be a subset of the
-allowlist. Selecting any forbidden collection fails the whole request without
-querying permitted collections or disclosing forbidden collection details.
+Omitted query `collections` uses the configured defaults, never all collections.
+Empty defaults require explicit query selection. Omitted allowlist permits
+explicit access to all; an empty allowlist permits none. Defaults must be a
+subset of the allowlist. A forbidden collection fails the whole request before
+any query is run. Admin operations can access all collections.
 
-## Discover and inspect
+## Flat arguments
 
-Call `corpus_describe` with `{}` for a compact catalog of accessible collections.
-For details:
+All tools take flat fields. There are no nested `request` wrappers or generic
+management action dispatchers.
+
+Call `corpus_describe` with `{}` for a compact catalog, or:
 
 ```json
-{"collections": ["programming", "manuals"]}
+{"collections":["books","code"]}
 ```
 
-The result includes descriptions, content kinds, counts and search capabilities.
-Detailed entries include field names, embedding settings and defaults. Operational
-discovery does not expose database paths, managed directories or source roots.
-
-## One query contract
+Call `corpus_query` for every collection kind:
 
 ```json
-{
-  "query": "Find an algorithm for unweighted shortest paths",
-  "collections": ["programming", "manuals"],
-  "mode": "hybrid",
-  "perspective": "expert",
-  "limit": 5,
-  "minimum_score": null,
-  "filters": {}
-}
+{"collections":["books","code"],"query":"configuration","mode":"hybrid","limit":5,"format":"llm"}
 ```
 
-- `collections`: optional nonempty array; one name and many names use the same tool.
-- `mode`: `keyword`, `semantic`, `hybrid`; default `hybrid`.
-- `perspective`: `general` or `expert`; default `general`. Expert selects the
-  positive/negative/description formula only for Knowledge Cards. Ordinary
-  documents retain general retrieval and report a warning rather than pretend
-  to have applicability vectors.
-- `limit`: positive global maximum, default 5, capped by `search.max_top_k`.
-- `minimum_score`: optional finite 0–1 per-collection cutoff. Explicit zero is
-  honored. Cards use their configured cutoff if omitted; documents have no cutoff
-  if omitted. This is not a universal probability threshold: see scoring below.
-- `filters`: document filters for extension, source IDs, path prefix, keywords and
-  numeric fields, following the REST filter schema in [API.md](API.md). Unknown
-  numeric fields or nonempty filters on card collections fail that collection
-  explicitly. Filters are never silently discarded by the corpus interface.
-- `include_graph_context`: null/omitted enables graph enrichment for source-code
-  collections only; false disables enrichment. True does not build graphs for
-  other collection kinds. This adds context, not another retrieval pass.
-- `format`: `llm` by default for MCP, returning readable text without duplicate
-  nested JSON; `raw` returns the complete structured payload. REST/Python
-  defaults remain raw. See [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).
+Modes are keyword, semantic, hybrid and structured. Structured is filter-only
+and supports documents/source code, not cards. `perspective=expert` applies
+card applicability/counter-indication scoring. Unsupported card filters are
+reported as per-collection failures. Numeric cutoffs use collection-specific
+score policies, not a universal probability.
 
-Modes describe retrieval channels; perspective describes the card scoring strategy.
-There is no separate single-query, multi-query or card-query MCP tool.
-Filter-only `structured` mode remains available in administrative REST/UI, not
-as an extra operational MCP mode.
-
-### Ranking and failure semantics
-
-Each collection searches with its recorded embedding model. Its candidates receive
-local ranks, then contribute `1 / (search.rrf_k + local_rank)` to a cross-collection
-result list. Global ordering uses these rank scores, then collection name and local
-rank for deterministic ties, not incompatible raw metric values. Duplicate sources
-across independently indexed collections remain separate results deliberately.
-
-Per-result relevance identifies the raw score policy:
-
-- Cards: confidence-weighted cosine/formula or normalized BM25; hybrid orders
-  by within-card rank fusion and exposes the strongest surviving channel score.
-- Document semantic: `1 / (1 + L2 distance)`.
-- Document keyword: nonnegative BM25 strength, not normalized confidence.
-- Document hybrid: configured weighted reciprocal rank fusion.
-
-`minimum_score` applies to each collection's own score policy before global fusion.
-A threshold such as 0.65 is meaningful for cards but can exclude all document
-hybrid results because RRF scores are much smaller. Use null for collection
-defaults or query a homogeneous scope when applying one numeric cutoff.
-
-Successful collections are listed separately from warnings. If some fail, the
-remaining results are returned with diagnostics. If all fail, the response is
-empty with warnings, not falsely presented as successful retrieval. Query-wide
-validation and authorization errors return MCP tool errors. Card hybrid retrieval
-can fall back to keyword when Ollama is unavailable and reports that fallback.
-Semantic-only failures are not hidden.
-
-## Raw reply envelope and readable evidence
-
-With `format="raw"`, `corpus_query` returns MCP `structuredContent` and a JSON
-text representation with:
-
-```text
-query
-effective_options: limit, ranking, per-collection mode/perspective/cutoff/policy/filters
-collections_searched
-warnings[]
-results[]
-  rank
-  kind: document | source_code | knowledge_card
-  collection
-  title
-  relevance: score, policy, vector, keyword, collection_rank, fusion_score
-  provenance
-  content
-  graph_context (source-code results when enabled)
-```
-
-The default `format="llm"` instead returns one text block without
-`structuredContent`, with numbered result headings, scores, location labels
-and compact natural-language graph context. Untrusted labels are escaped,
-single-line inline code; card content is fenced YAML with literal multiline
-code. Adaptive fences preserve embedded backticks and trailing newlines.
-Document/source snippets use text fences and retain truncation warnings.
-Full examples and uncertainty semantics are in [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md).
-
-Only top-level card IDs are removed; references, nested values and code text are
-preserved. Ordinary operational provenance omits internal IDs and filesystem paths.
-Source graph context deliberately includes opaque entity/source/chunk IDs for
-navigation and citation, with relative source paths, never generated absolute
-filesystem paths. Retrieved content remains untrusted evidence, never instructions.
-
-## Explicit source graph traversal
-
-`corpus_graph` is a read-only tool available on both profiles and restricted by
-the query profile's collection allowlist. It never parses, indexes or calls an LLM.
+Call `corpus_graph` for explicit graph traversal:
 
 ```json
-{"request":{"collection":"programming","action":"callers","symbol":"parse_config","depth":2,"limit":50}}
+{"collection":"code","action":"callers","symbol":"parse_config","depth":2,"format":"llm"}
 ```
 
-Actions are `find`, `neighbors`, `callers`, `callees`, `dependencies`,
-`inheritance`, and `impact`. Select a symbol or opaque `entity_id`; `source_id`
-can restrict selection or select the file module. Ambiguous names return
-candidates instead of guessing. See [SOURCE_GRAPH.md](SOURCE_GRAPH.md) for the
-full contract, static-analysis limitations and provenance semantics.
-Set `request.format="raw"` for structured graph data; omitted format defaults
-to `llm` on MCP. Graph `find`/ambiguous replies retain candidate IDs for exact
-follow-up selection, while ordinary readable chains omit metadata IDs.
-
-## Administration contracts
-
-Enable `server.mcp_admin_enabled=true` and restart to expose the admin endpoint.
-Each tool accepts one `request` object whose `action` selects a strict schema;
-irrelevant and unknown fields are rejected.
-
-### corpus_manage
-
-| Action | Parameters besides action |
-| --- | --- |
-| `create` | `name`, optional `kind`, `description`, `source_roots`, embedding/chunk overrides |
-| `inspect`, `manifest`, `roots`, `vacuum` | `collection` |
-| `update` | `collection`, `description` |
-| `delete` | `collection`, `confirm=true`, optional `delete_files` |
-| `register_root` | `collection`, `path`, optional `recursive` |
-| `unregister_root` | `collection`, `root_id`, `confirm=true` |
-| `sources` | `collection`, optional `limit`, `offset` |
-| `source` | `collection`, `source_id` |
-| `health` | none |
-
-Example:
+Call named administrative operations only on the admin profile:
 
 ```json
-{"request": {"action": "create", "name": "principles", "kind": "knowledge_cards"}}
+{"name":"code","kind":"source_code"}
 ```
 
-Names, models and chunk strategies remain immutable after creation; update edits
-the description. There is no rename action or arbitrary method/SQL dispatcher.
+That is a `collection_create` request. A `scan_start` request is:
 
-### corpus_ingest
+```json
+{"collection":"code","root":"/data/repo","recursive":true}
+```
 
-| Action | Parameters besides action |
-| --- | --- |
-| `add_file` | `collection`, `path` |
-| `upload` | `collection`, `filename`, `content_base64` |
-| `scan` | `collection`, `root`, optional `recursive`, `prune_missing`; `confirm=true` required for pruning |
-| `rebuild` | `collection`, `confirm=true` |
-| `remove_source` | `collection`, `source_id`, `confirm=true`, optional `delete_original_managed_file` |
+Use `scan_job_get`, `scan_job_cancel` or `scan_job_resume` for the returned job
+ID. Deletion, removal, root removal, rebuild and missing-file pruning require
+explicit confirmation. The complete field list is in [INTERFACES.md](INTERFACES.md).
 
-Uploads use unique names within the managed directory and cannot supply a path.
-Decoded bytes obey the configured file-size limit; failed indexed uploads remain
-available for diagnostics/retry. Source-root allowlists and original-file deletion
-restrictions apply equally to every ingestion surface.
+## Output and annotations
 
-### corpus_job
+MCP query and graph default to `format=llm`; raw is available explicitly.
+LLM output is one text block without duplicate structuredContent. Raw output
+includes JSON text plus structuredContent. Native list operations use
+`{"result":[...]}` for MCP because structuredContent must be an object; dictionary
+results retain their native shape. REST/Python/CLI retrieval defaults to raw.
 
-| Action | Parameters besides action |
-| --- | --- |
-| `list` | `collection`, optional `status`, `limit` |
-| `inspect`, `cancel`, `resume` | `collection`, `job_id` |
+Every registered tool serializes explicit boolean readOnlyHint, destructiveHint,
+idempotentHint and openWorldHint values from the shared catalog. The query tools
+are read-only, non-destructive, idempotent and closed-domain. Admin hints are
+specific to each named operation. Closed-domain does not mean air-gapped:
+configured Ollama/converter services can use the network.
 
-Job IDs must belong to the specified collection. Cancellation is cooperative and
-resume is explicit. Management tool replies wrap their outcome under `result`.
+Hints never replace authentication, path restrictions or confirmation.
+Retrieved content remains untrusted evidence. See
+[OUTPUT_FORMATS.md](OUTPUT_FORMATS.md) and [SOURCE_GRAPH.md](SOURCE_GRAPH.md).
 
-## Web and REST
+## SDK and discovery troubleshooting
 
-The browser keeps its full administrative workflows whether admin MCP is enabled
-or disabled. It uses the existing REST endpoints; authenticated administrators
-can also use `GET /api/corpus` and `POST /api/corpus/query` for the unified service.
-Query-only tokens cannot use REST as an administrative bypass.
+The package requires `mcp>=1.30.0,<2`; the lockfile selects 1.30.0. Both profiles
+advertise tools only, omitting unused prompt/resource capabilities. Unsupported
+prompt/resource methods return Method Not Found. No third-party transport
+monkeypatch or blanket error-log suppression is applied.
+
+Stop the old daemon and start the locked project environment:
+
+```sh
+uv sync --locked
+uv run --locked python -c 'from importlib.metadata import version; import mcp; print(version("ragdbman"), version("mcp"), mcp.__file__)'
+uv run --locked ragdbman serve
+```
+
+Preserve `--extra pymupdf` on sync/run commands when selected. A daemon importing
+MCP from `~/.local` may still be using an independently installed older SDK.
+Expected stateless teardown is tested without ERROR logs, while unexpected
+stream closure remains visible. An HTTP 200 alone does not establish tool success.
+
+Reload/reconnect clients after installing changed tool definitions. Hermes users
+can restart the client or refresh MCP discovery. Client-side prompt/resource
+wrappers are not ragdbman tools, and the server cannot remove stale definitions
+already cached by a host.

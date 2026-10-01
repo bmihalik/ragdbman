@@ -251,6 +251,6 @@ async def test_unicode_auth_and_malformed_host(engine, monkeypatch):
         transport=httpx.ASGITransport(app=create_app(engine, False)), base_url="http://localhost"
     ) as client:
         assert (
-            await client.get("/api/collections", headers={"Authorization": f"Basic {auth}"})
+            await client.post("/api/collections-list", json={}, headers={"Authorization": f"Basic {auth}"})
         ).status_code == 200
-        assert (await client.get("/api/collections", headers={"Host": "["})).status_code == 403
+        assert (await client.post("/api/collections-list", json={}, headers={"Host": "["})).status_code == 403
