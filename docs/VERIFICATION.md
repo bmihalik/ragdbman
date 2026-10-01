@@ -4,7 +4,68 @@ This record distinguishes automated development checks from real-environment
 acceptance. It is not production certification or an evaluation of real model
 quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
+## Version 0.5.4
+
+Repository consistency, expanded CLI help and release packaging were checked
+on Linux on 30 September 2026:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.11.15 | Installed base wheel, complete suite | 606 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable base, complete suite | 606 passed, 2 optional tests skipped |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, complete suite | 608 passed |
+| CPython 3.13.12 | Installed base wheel, complete suite | 606 passed, 2 optional tests skipped |
+
+The new consistency module validates all 31 command help pages, every option
+description and parseable example, and binds all 27 service command examples
+to current Engine signatures without opening user storage. It checks current
+TOML examples against `GlobalConfig`, relative Markdown links, API.md methods
+and paths against FastAPI decorators, Python-guide Engine calls against current
+signatures, and literal `RagError` codes against HTTP status mappings.
+
+That review found and corrected three behavioral/documentation problems:
+empty result tables lost collection/filter diagnostics; invalid and duplicate
+Knowledge Cards fell through to HTTP 500 despite having stable application
+codes; and CLI/version/count/reserved-setting prose had drifted. REST integration
+now verifies malformed card YAML returns 422, duplicate card IDs return 409,
+and the original indexed card remains unchanged.
+
+Both optional Chromium regressions passed, covering stable job inspection and
+the complete search/graph UI fixture. JavaScript syntax, Ruff, Python formatting,
+lockfile consistency, first-party Apache-2.0 headers and wheel/sdist builds pass.
+The rebuilt wheel contains CLI help, SQL/static resources, citation metadata,
+LICENSE and NOTICE.
+
+The review record in [REVIEW_0.5.4.md](REVIEW_0.5.4.md) describes the inspected
+surfaces and boundaries. Automated consistency checks cannot prove prose
+completeness, external-link availability, model quality or real converter/client
+compatibility. Real Hermes, Ollama, MinerU 3.4.5 and non-Linux acceptance remain
+outside these local checks.
+
 ## Version 0.5.3
+
+### Tool-annotation follow-up
+
+The 30 September annotation follow-up retains version 0.5.3 and explicitly
+declares all four boolean hints on each of the six tool decorators. Before
+the fix, new HTTP wire tests failed on missing `idempotentHint` while showing
+the other three hints already present. After the fix:
+
+| Interpreter | Profile | Result |
+| --- | --- | --- |
+| CPython 3.12.13 | Locked editable base, complete suite | 544 passed, 2 optional tests skipped |
+| CPython 3.11.15 | Rebuilt installed base wheel, MCP capability suite | 24 passed |
+| CPython 3.12.13 | Locked editable PyMuPDF extra, MCP capability suite | 24 passed |
+| CPython 3.13.12 | Rebuilt installed base wheel, MCP capability suite | 24 passed |
+
+The two new cases verify every tool name, hint presence, exact boolean type
+and intended value on both authenticated profiles' actual `tools/list` JSON.
+Ruff, formatting and first-party license-header checks pass. This follow-up
+does not claim full extra-profile or full 3.11/3.13 reruns; their complete-suite
+baselines are recorded below. The m8ven scanner and OpenAI directory were not
+run as acceptance checks, and annotations alone do not establish approval.
+
+### Initial capability/dependency patch
 
 MCP capability/dependency changes and release packaging were checked on Linux
 on 30 September 2026:

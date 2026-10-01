@@ -327,6 +327,11 @@ def clean(value):
 
 
 def table(command, payload):
+    diagnostics = []
+    if isinstance(payload, dict):
+        for key in ("collections_failed", "skipped_filters"):
+            if payload.get(key):
+                diagnostics.append(key + ": " + clean(payload[key]))
     rows = (
         payload
         if isinstance(payload, list)
@@ -341,7 +346,7 @@ def table(command, payload):
             else [{"value": payload}]
         )
     if not rows:
-        return "(no rows)"
+        return "\n".join(["(no rows)", *diagnostics])
     columns = {
         "list-collections": ["name", "kind", "counts", "embedding", "chunking"],
         "list-sources": ["id", "original_filename", "extension", "status"],
@@ -359,10 +364,7 @@ def table(command, payload):
         )
 
     output = [line(columns), "-+-".join("-" * w for w in widths), *[line(row) for row in data]]
-    if isinstance(payload, dict):
-        for key in ("collections_failed", "skipped_filters"):
-            if payload.get(key):
-                output.append(key + ": " + clean(payload[key]))
+    output.extend(diagnostics)
     return "\n".join(output)
 
 

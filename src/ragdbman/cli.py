@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 import tomli_w
@@ -17,6 +18,7 @@ import uvicorn
 from . import __version__
 from .chunking import fetch_tokenizer, tokenizer_path
 from .cli_commands import COMMANDS, arguments, contract, emit, exit_status, local, remote
+from .cli_help import COMMAND_HELP, OPTION_HELP, complete_help, epilog
 from .cli_signals import Interrupted, LocalSignals
 from .config import GlobalConfig
 from .diagnostics import configure_logging
@@ -36,6 +38,25 @@ MEDIA_HINTS = """
 """
 
 
+class HelpFormatter(argparse.HelpFormatter):
+    """Wrap prose while preserving deliberate paragraph and example line breaks."""
+
+    def _fill_text(self, text, width, indent):
+        lines = []
+        for line in text.splitlines():
+            if not line:
+                lines.append("")
+                continue
+            # Keep shell examples copyable as one command, even on narrow terminals.
+            if line.lstrip().startswith("ragdbman "):
+                lines.append(indent + line)
+                continue
+            leading = line[: len(line) - len(line.lstrip())]
+            prefix = indent + leading
+            lines.append(textwrap.fill(line.strip(), width, initial_indent=prefix, subsequent_indent=prefix))
+        return "\n".join(lines)
+
+
 def init_config(path: Path):
     path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,15 +72,32 @@ def init_config(path: Path):
 
 def parser():
     result = argparse.ArgumentParser(
-        prog="ragdbman", description="Local document intelligence and MCP server"
+        prog="ragdbman",
+        description="Index and query local documents, source code and Knowledge Cards; "
+        "serve a web UI, REST API and MCP tools.",
+        formatter_class=HelpFormatter,
+        epilog="Getting started:\n"
+        "  ragdbman init                    Write a new TOML configuration.\n"
+        "  ragdbman serve                   Start the configured daemon and web UI.\n"
+        "  ragdbman COMMAND --help          Explain one command and all its options.\n\n"
+        "Service commands run directly against local storage unless --server-url is given.\n"
+        "Do not open the same storage while a daemon owns it; use its REST URL instead.\n"
+        "See docs/CLI.md for workflows, authentication, output formats and exit statuses.",
     )
     result.add_argument("--version", action="version", version=f"ragdbman {__version__}")
-    result.add_argument("--config", default="~/.config/ragdbman/config.toml")
+    result.add_argument("--config", default="~/.config/ragdbman/config.toml", help=OPTION_HELP["config"])
     levels = ["trace", "debug", "verbose", "info", "warning", "warn", "error", "critical"]
-    result.add_argument("--log-level", choices=levels)
-    sub = result.add_subparsers(dest="command", required=True)
+    result.add_argument("--log-level", choices=levels, help=OPTION_HELP["log_level"])
+    sub = result.add_subparsers(dest="command", required=True, title="commands", metavar="COMMAND")
     for command in ("serve", "init", "registry-repair", "fetch-tokenizer", *COMMANDS):
-        item = sub.add_parser(command)
+        summary, details, _ = COMMAND_HELP[command]
+        item = sub.add_parser(
+            command,
+            help=summary,
+            description=f"{summary}\n\n{details}",
+            formatter_class=HelpFormatter,
+            epilog=epilog(command, command in COMMANDS),
+        )
         item.add_argument("--config", default=argparse.SUPPRESS)
         item.add_argument(
             "--log-level",
@@ -73,6 +111,7 @@ def parser():
             item.add_argument("--model")
             item.add_argument("--revision", default="main")
             item.add_argument("--hub-base-url", default="https://huggingface.co")
+        complete_help(item, command)
     return result
 
 

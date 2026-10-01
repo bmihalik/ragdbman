@@ -1,6 +1,6 @@
 # Python Call-Level API Guide
 
-Updated for ragdbman 0.5.2 from the supplied guide. The implementation is the
+Updated through ragdbman 0.5.4 from the supplied guide. The implementation is the
 authority for signatures, lifecycle and return fields; examples below describe
 the current Python, CLI and transport boundaries.
 
@@ -73,7 +73,7 @@ Key configuration sections:
 | `server` | Bind address, port, MCP path, auth mode |
 | `storage` | Data directory, registry path, allowed source roots, sidecar settings |
 | `ollama` | Embedding model, base URL, batch size, concurrency, timeouts |
-| `defaults` | Chunk size/overlap, scan concurrency, file size limits, recursive scanning |
+| `defaults` | Chunk size/overlap, scan concurrency, file size limits; `recursive_scan` is reserved, use each request's `recursive` argument |
 | `source_code` | Chunk size/overlap for `source_code` collections |
 | `graph` | Source-code graph enablement, parser budgets, enrichment limits |
 | `search` | Default/max top-k, vector/keyword weights, RRF k, context char limit |

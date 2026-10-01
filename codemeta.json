@@ -3,7 +3,7 @@
   "@type": "SoftwareSourceCode",
   "name": "ragdbman",
   "description": "An inspectable local document intelligence system in Python, with independent document, source-code and Knowledge Cards collections, SQLite full-text and vector retrieval, Ollama embeddings, and separate operational and administrative corpus MCP interfaces.",
-  "softwareVersion": "0.5.3",
+  "softwareVersion": "0.5.4",
   "dateModified": "2026-09-30",
   "license": "https://spdx.org/licenses/Apache-2.0",
   "author": [

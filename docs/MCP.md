@@ -75,6 +75,42 @@ HTTP 200 status alone does not prove that the JSON-RPC operation succeeded.
 | Query | `/mcp/query` | `corpus_describe`, `corpus_query`, `corpus_graph` |
 | Admin | `/mcp/admin` | All three query tools plus `corpus_manage`, `corpus_ingest`, `corpus_job` |
 
+### Explicit tool annotations
+
+Every tool decorator declares all four boolean hints explicitly; `tools/list`
+serializes the values below on both profiles. None relies on omitted SDK defaults
+or a shared annotation variable that a static source checker might not resolve.
+
+| Tool | readOnlyHint | destructiveHint | idempotentHint | openWorldHint |
+| --- | --- | --- | --- | --- |
+| `corpus_describe` | true | false | true | false |
+| `corpus_query` | true | false | true | false |
+| `corpus_graph` | true | false | true | false |
+| `corpus_manage` | false | true | false | false |
+| `corpus_ingest` | false | true | false | false |
+| `corpus_job` | false | true | false | false |
+
+Read-only tools do not mutate the corpus; idempotence concerns effects, not
+a promise of identical results while another process changes the indexed data.
+Administrative hints conservatively describe the whole action-dispatch tool:
+manage can delete, ingest can replace/prune/rebuild, and job can cancel or resume
+work that replaces indexed state. Read-only sub-actions do not make those tools
+read-only, and retries are not guaranteed to have no additional effect.
+
+`openWorldHint=false` describes the bounded corpus, authorized source paths,
+jobs and operator-configured processing services. These are not arbitrary
+web-search, URL-fetch or external-message tools. It is not an air-gap guarantee:
+configured Ollama endpoints, model/tokenizer downloads and external converters
+can use the network. Retrieved content must still be treated as untrusted.
+
+Annotations are descriptive hints, not access controls or confirmation enforcement,
+as explained by the [MCP maintainers](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/).
+The existing token scopes, path guards and explicit destructive-action confirmations
+remain authoritative; completing these fields alone does not certify directory
+acceptance or a particular third-party scanner result.
+
+### Credentials and endpoint scope
+
 The endpoint prefix is configurable with `server.mcp_path`. Admin MCP is disabled
 by default and returns HTTP 404 while disabled. The bare prefix exposes no tools.
 The web interface remains capable of administration independently.

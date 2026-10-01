@@ -93,6 +93,33 @@ async def test_duplicate_ids_are_rejected_without_replacing_first(engine, source
         assert conn.execute("SELECT title FROM kc_cards").fetchone()[0] == "Breadth-first search"
 
 
+async def test_rest_card_validation_and_duplicate_are_not_server_errors(engine, source_dir, monkeypatch):
+    monkeypatch.delenv("RAGDBMAN_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("RAGDBMAN_QUERY_TOKEN", raising=False)
+    await create(engine, source_dir)
+    malformed = source_dir / "bad.yaml"
+    malformed.write_text("id: BROKEN\ncategory: Programming\ntitle: [broken\n")
+    original = source_dir / "first.yaml"
+    original.write_text(yaml.safe_dump(card()))
+    duplicate = source_dir / "duplicate.yaml"
+    duplicate.write_text(yaml.safe_dump(card(title="Must not replace the original")))
+    app = create_app(engine)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://localhost"
+    ) as client:
+        route = "/api/collections/cards/add_file"
+        response = await client.post(route, json={"path": str(malformed)})
+        assert response.status_code == 422
+        assert response.json()["code"] == "KNOWLEDGE_CARD_INVALID"
+        response = await client.post(route, json={"path": str(original)})
+        assert response.status_code == 200
+        response = await client.post(route, json={"path": str(duplicate)})
+        assert response.status_code == 409
+        assert response.json()["code"] == "KNOWLEDGE_CARD_DUPLICATE"
+    with engine.connection("cards") as conn:
+        assert conn.execute("SELECT title FROM kc_cards").fetchone()[0] == "Breadth-first search"
+
+
 async def test_confidence_threshold_and_keyword_only_avoids_embedder(engine, fake, source_dir):
     path = source_dir / "low.yaml"
     path.write_text(yaml.safe_dump(card(confidence=0.1), sort_keys=False))

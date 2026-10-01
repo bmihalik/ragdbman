@@ -13,11 +13,20 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 ## Coverage map
 
-`tests/test_mcp_capabilities.py` adds 22 cases covering actual initialization
+`tests/test_repo_consistency.py` makes cross-surface drift executable. It checks
+that all 31 CLI commands have detailed descriptions/examples, every option has
+nontrivial help, examples parse, 27 service contracts bind to their Engine
+signatures, relative Markdown links resolve, API.md matches implemented REST
+routes, and direct Engine calls in the Python guide bind to current signatures.
+It also covers empty-result table diagnostics.
+
+`tests/test_mcp_capabilities.py` contains 24 cases covering actual initialization
 capabilities on both profiles, unchanged tool counts and usable discovery,
 unsupported prompt/resource/template/subscription methods, serial/concurrent
 stateless pings, expected teardown without ERROR logs, unexpected closure with
-ERROR logs retained, and source/lock/installed-package dependency requirements.
+ERROR logs retained, source/lock/installed-package dependency requirements,
+and all four explicit boolean annotations with their intended values on every
+tool in both profiles' serialized `tools/list` replies.
 
 `test_web_graph_ui.py` checks administrative authentication on the new graph
 pages. Optional `browser_search_graph.mjs` covers formats, graph controls,

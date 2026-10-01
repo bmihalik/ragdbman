@@ -113,6 +113,13 @@ stored in artifacts when enabled; converter scratch directories are cleaned up
 after normal/cancelled calls regardless of reserved `preserve_artifacts`.
 See [RUNTIME.md](RUNTIME.md) for shutdown deadlines and forced-exit limitations.
 
+`defaults.recursive_scan` is currently reserved: scan requests and registered
+roots have their own `recursive` value, defaulting to true. Setting the global
+field to false does not change those request defaults; use `--no-recursive`
+or `recursive=false` in the relevant API request. `preserve_artifacts` is also
+reserved and does not prevent converter scratch cleanup. These settings are
+retained in the schema, not advertised as active behavior.
+
 ## Search
 
 Under `[search]`, defaults are `default_top_k=8`, `max_top_k=50`, `vector_weight=0.65`, `keyword_weight=0.35`, `rrf_k=60`, and `return_context_chars_per_chunk=2400`. Requested result counts are capped at `max_top_k`.

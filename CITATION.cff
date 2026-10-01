@@ -10,7 +10,7 @@ title: ragdbman
 authors:
   - family-names: MIHALIK
     given-names: Bela Istvan
-version: "0.5.3"
+version: "0.5.4"
 date-released: "2026-09-30"
 license: Apache-2.0
 abstract: >-

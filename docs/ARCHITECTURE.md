@@ -42,7 +42,7 @@ The Python service is organized around a shared `Engine`. Transport code validat
 | Blocking-work isolation and cancellation cleanup | `workers.py` |
 | MCP interface | `mcp_server.py` |
 | REST and administrative UI | `web.py`, `static/` |
-| Command-line interface | `cli.py`, `cli_commands.py`, `cli_signals.py`, `process_lock.py`, `__main__.py` |
+| Command-line interface | `cli.py`, `cli_help.py`, `cli_commands.py`, `cli_signals.py`, `process_lock.py`, `__main__.py` |
 
 ## Ingestion path
 

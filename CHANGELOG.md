@@ -1,7 +1,103 @@
 # Changelog
 
+## 0.5.4
+
+- Replace terse argparse listings with a self-contained CLI help catalog:
+  every command has a purpose, operational caveats and a valid example; every
+  option explains accepted values, defaults, effects and relevant safety limits.
+- Explain direct versus daemon ownership, host interpretation of paths, output
+  behavior and discovery of IDs in each service command's help.
+- Preserve multi-search failure and skipped-filter diagnostics in table output
+  even when no result rows exist.
+- Map invalid Knowledge Card content to HTTP 422 and duplicate card IDs to
+  HTTP 409 instead of the generic 500 fallback; preserve existing error codes.
+- Add offline repository consistency tests for every CLI command/example/option,
+  CLI-to-Engine signature binding, Markdown relative links, documented REST
+  routes, TOML setup examples, error-status mappings and Python guide Engine calls.
+- Correct documentation version/command-count drift and refresh CLI, Python API,
+  feature, testing and release records. Indexes and request schemas are unchanged.
+
+### Repository consistency review in 0.5.4
+
+This review covers the current Python repository's interfaces, help, documentation,
+release metadata and regression behavior. It combines source inspection,
+machine-checked contract comparisons and executable tests; it is not a claim
+that every algorithm or deployment has been formally verified.
+
+### Problems corrected
+
+- **CLI discoverability:** The top-level command list previously omitted command
+  descriptions, and many options had no explanation. All 31 commands now have
+  a purpose, behavior/safety notes and a copyable example. Every option explains
+  its meaning, with relevant defaults, limits and source of IDs.
+- **Missing diagnostics:** Empty search tables returned before printing
+  collection failures and skipped-filter information. The output now preserves
+  those diagnostics after `(no rows)`.
+- **Knowledge Card HTTP errors:** `KNOWLEDGE_CARD_INVALID` and
+  `KNOWLEDGE_CARD_DUPLICATE` lacked status mappings and incorrectly used the
+  generic 500 fallback. They now return 422 and 409 respectively. A real
+  REST/Engine regression checks malformed YAML, duplicate rejection and
+  preservation of the original card.
+- **Command-count ambiguity:** The CLI guide now states the exact breakdown:
+  four infrastructure commands, 25 specified engine-service commands and two
+  specialized retrieval commands, 31 in total.
+- **Collection-kind drift:** Contributor guidance now explicitly preserves all
+  three collection kinds, including whole-field Knowledge Card indexing.
+- **Reserved settings:** Configuration and Python guidance explicitly distinguish
+  the unused global `defaults.recursive_scan` setting from the active per-request
+  recursion flag. Reserved artifact/temp/health-poll settings remain documented
+  as such instead of claiming behavior they do not implement.
+- **Shutdown scope:** Runtime documentation now states that the configured
+  cleanup deadline also applies to direct CLI service operations, not only serve.
+- **Coverage invocation:** README now uses the same source-directory coverage
+  target as the testing guide, avoiding ambiguity with the same-named launcher.
+- **Release identity:** Package metadata, runtime version, lockfile, citation,
+  CodeMeta and README citation identify 0.5.4. Historical changelog and
+  verification records retain their actual release versions.
+
+### Checks added to the repository
+
+`tests/test_repo_consistency.py` checks:
+
+- All CLI commands have detailed help, nonempty option explanations and examples.
+- All command examples parse; service example arguments bind to actual Engine
+  signatures without executing operations or opening user databases.
+- Rendered examples remain intact rather than being broken into separate shell
+  commands by terminal-width wrapping.
+- Relative Markdown link targets exist across root documentation and `docs/`.
+- Documented REST routes/methods match the FastAPI route declarations.
+- Direct Engine calls in Python-guide code blocks bind to current signatures.
+- Current TOML setup examples parse and validate against `GlobalConfig`.
+- Literal application error codes have a declared HTTP status mapping.
+- Empty table output preserves failure and skipped-filter diagnostics.
+
+These supplement existing tests for release metadata, MCP wire discovery and
+annotations, authorization, source/Knowledge Card indexing, SQLite recovery,
+graph provenance, converters, CLI subprocesses and shutdown.
+
+### Review scope and retained boundaries
+
+The review compared CLI/REST/MCP dispatch and public request models, configuration
+defaults and reserved fields, collection/index lifecycle descriptions, graph
+contracts, PDF setup guidance, ownership/shutdown rules and packaging metadata.
+No source-sidecar policy, retrieval format default, authentication scope or
+index schema changed. Existing data does not require rebuilding.
+
+See [VERIFICATION.md](VERIFICATION.md) for actual test results and interpreter
+profiles. Tests use disposable files/databases and deterministic embedding
+fixtures, not the owner's production corpus. External link availability,
+directory acceptance, real Hermes behavior, real Ollama quality, MinerU 3.4.5,
+other external converters and non-Linux deployments remain separate acceptance
+work. Existing documented limitations such as best-effort graph resolution,
+exact vector-search scaling and the pending web chunk browser are not relabelled
+as completed by this consistency review.
+
 ## 0.5.3
 
+- Annotation follow-up: declare all four boolean MCP tool hints directly on
+  every decorator, including the admin-only tools. Add `idempotentHint=true`
+  to read-only tools and `false` to action-dispatch administrative tools.
+  Verify actual `tools/list` JSON rather than only in-process SDK objects.
 - Require MCP SDK `>=1.30.0,<2`; retain the tested 1.30.0 lockfile resolution.
   Expected stateless transport teardown is handled by the SDK, without a
   ragdbman log filter or third-party transport monkeypatch.

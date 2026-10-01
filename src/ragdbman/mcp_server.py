@@ -70,11 +70,12 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
         streamable_http_path=engine.config.server.mcp_path + "/" + profile,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
-    readonly = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 
     @server.tool(
         description="Discover permitted collections, or inspect capabilities and fields for selected collections.",
-        annotations=readonly,
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
     )
     def corpus_describe(collections: list[str] | None = None) -> CallToolResult:
         return structured(corpus.describe(engine, collections, admin=admin))
@@ -87,7 +88,9 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
             "limit is global. format=llm (default) returns readable excerpts and static graph context; "
             "format=raw returns full structured JSON."
         ),
-        annotations=readonly,
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
     )
     async def corpus_query(
         query: str,
@@ -122,20 +125,23 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
         "dependencies, inheritance, impact. Select exact symbol or entity_id; ambiguous matches "
         "return candidates. Static resolution is best-effort, not a runtime call graph. "
         "request.format defaults to llm; choose raw for full JSON.",
-        annotations=readonly,
+        annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+        ),
     )
     async def corpus_graph(request: MCPGraphRequest) -> CallToolResult:
         corpus.scope(engine, [request.collection], admin=admin)
         return presented(await engine.graph(request))
 
     if admin:
-        mutation = ToolAnnotations(readOnlyHint=False, destructiveHint=True, openWorldHint=False)
 
         @server.tool(
             description="Manage collections with a validated action-specific request. "
             "Actions: create, update, delete, inspect, roots, register_root, unregister_root, "
             "sources, source, manifest, vacuum, health. Destructive actions need confirm=true.",
-            annotations=mutation,
+            annotations=ToolAnnotations(
+                readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+            ),
         )
         async def corpus_manage(request: corpus_admin.Manage) -> CallToolResult:
             return structured({"result": await corpus_admin.manage(engine, request)})
@@ -143,14 +149,18 @@ def create_mcp(engine: Engine, admin: bool = False) -> FastMCP:
         @server.tool(
             description="Index sources: add_file, upload (base64), scan, rebuild, remove_source. "
             "Rebuild, removal and scan with pruning require confirm=true.",
-            annotations=mutation,
+            annotations=ToolAnnotations(
+                readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+            ),
         )
         async def corpus_ingest(request: corpus_admin.Ingest) -> CallToolResult:
             return structured({"result": await corpus_admin.ingest(engine, request)})
 
         @server.tool(
             description="List, inspect, cancel or resume collection indexing jobs.",
-            annotations=mutation,
+            annotations=ToolAnnotations(
+                readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+            ),
         )
         def corpus_job(request: corpus_admin.Jobs) -> CallToolResult:
             return structured({"result": corpus_admin.jobs(engine, request)})

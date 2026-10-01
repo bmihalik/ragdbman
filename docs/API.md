@@ -132,4 +132,9 @@ Responses include `results`, `applied_filters`, `skipped_filters`, and, for sing
 
 Application errors use `{"code":"...","message":"..."}` with optional context. Request-schema errors use FastAPI's HTTP 422 validation detail. Common codes include `CONFIG_INVALID`, `COLLECTION_NOT_FOUND`, `COLLECTION_BUSY`, `PATH_NOT_ALLOWED`, `FILE_TOO_LARGE`, `EXTRACTION_FAILED`, `OLLAMA_UNAVAILABLE`, `EMBEDDING_FAILED`, `VECTOR_SCHEMA_MISMATCH`, and `CONFIRMATION_REQUIRED`.
 
+Invalid card content returns `KNOWLEDGE_CARD_INVALID` with HTTP 422; a card ID
+already owned by another source returns `KNOWLEDGE_CARD_DUPLICATE` with HTTP 409.
+These are validation/conflict errors, not internal server failures. The original
+card is preserved when a duplicate is rejected.
+
 Retrieved document text is untrusted input for AI clients. It does not authorize shell execution, SQL execution, secret access or destructive tools. Explicit confirmations and configured source-root restrictions remain mandatory independently of anything a retrieved document says.

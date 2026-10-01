@@ -20,9 +20,9 @@ transport regression for changes that affect the external contract.
 
 ## Design rules
 
-- Preserve both collection kinds. Source-code collections must never create
+- Preserve all three collection kinds. Source-code collections must never create
   Markdown sidecars, while general collections may deliberately index code as
-  documents.
+  documents. Knowledge Cards retain whole-field YAML indexing without sidecars.
 - Preserve stable source IDs, transactional updates, explicit deletion
   confirmation, and original-file protection.
 - Validate all embedding vectors and dimensions; never hide provider errors by

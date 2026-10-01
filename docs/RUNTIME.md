@@ -138,8 +138,9 @@ This is an emergency path, not graceful completion. Uncommitted SQL transactions
 are recovered/rolled back; unfinished jobs require explicit resume, and converter
 scratch files may remain. Do not assume in-flight work was indexed successfully.
 
-The deadline applies to `ragdbman serve`/the bundled launcher, not arbitrary
-third-party ASGI hosting or callers using `Engine` directly. Programmatic
+The deadline applies to `ragdbman serve` and direct CLI service operations
+(including the bundled launcher), not arbitrary third-party ASGI hosting or
+callers using `Engine` directly. Programmatic
 `Engine.close()` retains the safe drain-before-release contract. Process-group
 behavior is verified on Linux/POSIX; intentionally detached services/remote
 model servers are not killed, and Windows descendant cleanup has not been

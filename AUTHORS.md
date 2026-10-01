@@ -14,7 +14,8 @@ AI-assisted implementation work.
   distinction between source-code indexing and document-style indexing.
   Supplied the Knowledge Cards specification and representative card corpus.
   Supplied the CLI extension specification and Python API guide used for the
-  0.5.2 implementation and documentation work.
+  implementation and documentation work. Requested the repository consistency
+  review and more explanatory command-line help delivered in 0.5.4.
 - **Technical and product direction:** Made the final decisions on technology,
   community focus, optional PDF backends, external-tool integration, and
   Apache-2.0 licensing; reviewed proposals and requested refinements.
@@ -38,6 +39,8 @@ AI-assisted implementation work.
 - **Documentation and release preparation:** Drafted and updated guides,
   configuration examples, feature and test documentation, packaging, CI
   configuration, and license notices at the project owner's direction.
+  Performed the 0.5.4 source/documentation consistency review and generated
+  executable drift checks and expanded command help under that direction.
 
 ## Scope of these credits
 

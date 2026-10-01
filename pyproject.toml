@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragdbman"
-version = "0.5.3"
+version = "0.5.4"
 description = "Inspectable local document intelligence, SQLite retrieval, and MCP"
 readme = "README.md"
 requires-python = ">=3.11"

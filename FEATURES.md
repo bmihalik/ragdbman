@@ -146,6 +146,9 @@ flags, repeated numeric filters, JSON/table output, readable search output,
 manifest export, and two-second job watching. Direct jobs retain their engine
 until stopped; optional daemon transport uses existing administrative REST.
 CLI/serve acquire storage/registry ownership locks before startup recovery.
+Every command's `--help` explains purpose, options, defaults, safety and an
+example. Empty table output retains failure/filter diagnostics rather than
+reducing a failed multi-search to a misleading `(no rows)` alone.
 See [CLI.md](docs/CLI.md) and [PYTHON_API_GUIDE.md](docs/PYTHON_API_GUIDE.md).
 
 Query/graph output has `raw` and `llm` presentations. MCP defaults to readable
@@ -170,6 +173,10 @@ include entity/relationship inspection and complete JSON; LLM views preserve the
 server's text with copy/select controls. See [WEB_UI.md](docs/WEB_UI.md).
 
 The service provides password/token authentication and a shared-secret boundary for an OAuth reverse proxy. OAuth itself remains the reverse proxy's responsibility. Host/origin checks and source-root checks apply to REST and MCP.
+
+Both MCP profiles advertise only tools, not unused prompt/resource capabilities.
+Every tool declares four explicit boolean behavior hints; their conservative
+administrative values do not replace authentication or confirmation enforcement.
 
 ## Known limitations
 

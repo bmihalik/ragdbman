@@ -16,6 +16,12 @@ uv run ruff format --check .
 uv build
 ```
 
+The complete suite includes offline repository-consistency checks. They parse all
+Markdown links, compare the REST route table with FastAPI decorators, validate
+every CLI help page and example, bind CLI contracts to Engine signatures, and
+parse direct Engine calls in the Python API guide. These checks catch structural
+drift; they do not prove that prose is complete or that external links remain live.
+
 The base profile contains no PyMuPDF installation. Two tests specifically for
 the optional PyMuPDF extraction/OCR paths skip when the extra is absent; the
 ordinary PDF fixtures and all pypdf/MinerU contract tests run without it.

@@ -4,9 +4,17 @@ An inspectable, local document intelligence system, implemented in Python. Organ
 
 Collections use SQLite files and embeddings come from Ollama. The shared engine exposes document, source-code and Knowledge Cards indexing, REST endpoints, and a compact `corpus_` MCP interface: three operational tools, with three additional administrative tools available separately.
 
+Version 0.5.4 expands `ragdbman --help` and every `COMMAND --help` page with
+purpose, behavior, defaults, safety notes and examples. It also adds automated
+source/documentation consistency checks and preserves diagnostics in empty CLI
+tables. See the [CLI reference](docs/CLI.md).
+
 Version 0.5.3 tightens the MCP dependency to `>=1.30.0,<2` and stops advertising
 unused prompt/resource capabilities on both MCP profiles. The three operational
 tools remain unchanged; no index rebuild or re-embedding is required.
+The annotation follow-up explicitly declares `readOnlyHint`, `destructiveHint`,
+`idempotentHint` and `openWorldHint` on every query and administrative tool;
+their values and scope are documented in [MCP setup](docs/MCP.md).
 
 After replacing the source, stop the old daemon, run `uv sync --locked`, then
 start with `uv run --locked ragdbman serve`. Preserve any optional extras in both
@@ -294,7 +302,7 @@ Knowledge Cards are whole records in `kc_cards`, not rows in `chunks`.
 
 ## Citing ragdbman
 
-Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.3) [Computer software].
+Bela Istvan MIHALIK (2026). ragdbman (Version 0.5.4) [Computer software].
 Machine-readable citation and software metadata are provided in
 [CITATION.cff](CITATION.cff) and [codemeta.json](codemeta.json).
 Human and AI-assisted contributions are distinguished in [AUTHORS.md](AUTHORS.md).
@@ -331,7 +339,7 @@ for configuration, safeguards, limitations and reproducible benchmarks.
 ```bash
 uv sync --locked
 uv run pytest
-uv run pytest --cov=ragdbman --cov-config=pyproject.toml --cov-report=term-missing
+uv run pytest --cov=src/ragdbman --cov-config=pyproject.toml --cov-report=term-missing
 uv run ruff check .
 uv run ruff format --check .
 uv build

@@ -1,8 +1,8 @@
 # Command-line interface
 
-ragdbman 0.5.2 provides the 29 commands from the CLI extension specification,
-plus `graph` and `search-knowledge-cards` for the current engine's specialized
-retrieval services. The four existing infrastructure commands remain available.
+ragdbman 0.5.4 provides 31 commands: four infrastructure commands, 25
+engine-service commands from the CLI extension specification, plus `graph` and
+`search-knowledge-cards` for the current engine's specialized retrieval services.
 Service command names are engine method names with underscores replaced by
 hyphens. MCP retains its separate compact `corpus_` interface; it does not expose
 one tool per engine method.
@@ -16,6 +16,20 @@ uv run ragdbman --config /path/config.toml list-collections
 uv run ragdbman list-collections --config /path/config.toml --log-level debug
 ```
 
+The top-level help lists every command with a one-line purpose. Each command's
+help is designed to stand alone: it explains what the command does, direct versus
+daemon behavior, option meanings/defaults, destructive effects, where to obtain
+IDs and one parseable example. Optional syntax in the `usage:` line is only a
+summary; the `options:` section is authoritative.
+
+Examples:
+
+```sh
+uv run ragdbman create-collection --help
+uv run ragdbman start-scan --help
+uv run ragdbman graph --help
+```
+
 Every subcommand accepts `--config` and `--log-level`; these may also precede
 the command. If specified in both positions, the subcommand value wins.
 The default config is `~/.config/ragdbman/config.toml`. Log levels are
@@ -27,6 +41,8 @@ Service commands default to JSON on stdout, with logs/progress/errors on stderr.
 have selected columns, while other records use field/value rows. Cells are
 escaped and capped at 80 characters: use JSON for complete values.
 Empty tables show `(no rows)`. Search tables retain collection/filter diagnostics.
+If a multi-search has no result rows, its `collections_failed` and
+`skipped_filters` diagnostics are still printed after `(no rows)`.
 Search, search-multi and graph also accept `--format llm`, using the 0.5.1
 readable presentation; CLI `json` corresponds to the Python API's `raw`.
 
