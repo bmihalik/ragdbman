@@ -53,6 +53,16 @@ select = ["E4", "E7", "E9", "F", "I", "B"]
 [tool.hatch.build.targets.wheel]
 packages = ["src/ragdbman"]
 
+[tool.coverage.run]
+branch = true
+source = ["src/ragdbman"]
+relative_files = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
 [tool.hatch.build.targets.wheel.force-include]
 "CITATION.cff" = "ragdbman/CITATION.cff"
 "codemeta.json" = "ragdbman/codemeta.json"
+

@@ -2,28 +2,74 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: Python tests
+
 on: [push, pull_request]
+
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         python: ["3.11", "3.12", "3.13"]
         pdf: ["base", "pymupdf"]
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
+
       - if: matrix.pdf == 'base'
         run: uv sync --locked
+
       - if: matrix.pdf == 'pymupdf'
         run: uv sync --locked --extra pymupdf
-      - run: uv run --no-sync pytest
+
+      - if: matrix.python == '3.12' && matrix.pdf == 'base'
+        run: >
+          uv run --no-sync pytest
+          --cov=src/ragdbman
+          --cov-config=pyproject.toml
+          --cov-report=term-missing
+          --cov-report=xml:coverage.xml
+          --cov-report=html:htmlcov
+
+      - if: matrix.python != '3.12' || matrix.pdf != 'base'
+        run: uv run --no-sync pytest
+
+      - if: matrix.python == '3.12' && matrix.pdf == 'base'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-python-3.12-base
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+      - if: matrix.python == '3.12' && matrix.pdf == 'base' && github.event_name != 'pull_request'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: true
+          use_oidc: true
+
       - run: uv run --no-sync ruff check .
+
       - run: uv run --no-sync ruff format --check .
+
       - run: uv run --no-sync python tools/license_headers.py
+
       - if: matrix.pdf == 'base'
-        run: uv run --no-sync python -c "import importlib.util; assert importlib.util.find_spec('pymupdf') is None"
+        run: >
+          uv run --no-sync python -c
+          "import importlib.util; assert importlib.util.find_spec('pymupdf') is None"
+
       - run: uv build
