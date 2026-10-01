@@ -107,7 +107,7 @@ contracts, PDF setup guidance, ownership/shutdown rules and packaging metadata.
 No source-sidecar policy, retrieval format default, authentication scope or
 index schema changed. Existing data does not require rebuilding.
 
-See [VERIFICATION.md](VERIFICATION.md) for actual test results and interpreter
+See [VERIFICATION.md](docs/VERIFICATION.md) for actual test results and interpreter
 profiles. Tests use disposable files/databases and deterministic embedding
 fixtures, not the owner's production corpus. External link availability,
 directory acceptance, real Hermes behavior, real Ollama quality, MinerU 3.4.5,

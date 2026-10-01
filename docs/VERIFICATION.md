@@ -82,7 +82,7 @@ lockfile consistency, first-party Apache-2.0 headers and wheel/sdist builds pass
 The rebuilt wheel contains CLI help, SQL/static resources, citation metadata,
 LICENSE and NOTICE.
 
-The review record in [REVIEW_0.5.4.md](REVIEW_0.5.4.md) describes the inspected
+The review record in [CHANGELOG at 0.5.4](../CHANGELOG.md) describes the inspected
 surfaces and boundaries. Automated consistency checks cannot prove prose
 completeness, external-link availability, model quality or real converter/client
 compatibility. Real Hermes, Ollama, MinerU 3.4.5 and non-Linux acceptance remain
