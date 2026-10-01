@@ -44,8 +44,7 @@ jobs:
       - if: matrix.python != '3.12' || matrix.pdf != 'base'
         run: uv run --no-sync pytest
 
-      - if: matrix.python == '3.12' && matrix.pdf == 'base'
-        if: always()
+      - if: always() && matrix.python == '3.12' && matrix.pdf == 'base'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-python-3.12-base
