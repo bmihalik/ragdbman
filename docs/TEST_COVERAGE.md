@@ -13,6 +13,12 @@ for limits that tests do not turn into compiler/runtime guarantees.
 
 ## Coverage map
 
+`tests/test_mcp_source_declarations.py` checks all 28 explicitly named tool
+functions for literal boolean annotations, confirms that only the three query
+tools are outside the admin branch, and compares generated source against the
+operation catalog. This is a static-source regression, not a replacement for
+the existing initialization, schema and `tools/list` wire tests.
+
 `tests/test_repo_consistency.py` makes cross-surface drift executable. It checks
 that all 31 CLI commands have detailed descriptions/examples, every option has
 nontrivial help, examples parse, 28 service contracts bind to their Engine

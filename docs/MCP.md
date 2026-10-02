@@ -102,6 +102,31 @@ are read-only, non-destructive, idempotent and closed-domain. Admin hints are
 specific to each named operation. Closed-domain does not mean air-gapped:
 configured Ollama/converter services can use the network.
 
+The checked-in `src/ragdbman/mcp_tools.py` also declares those values as literal
+`True`/`False` arguments on each named `@server.tool` decorator. This matters for
+static source analyzers: they may not resolve a generic factory's `__name__`
+assignment or evaluate expressions such as `bool(spec.readonly)`, even when
+the actual `tools/list` response is correct.
+
+`operations.py` remains the authoritative contract. After changing that catalog,
+regenerate the declarations with:
+
+```sh
+uv run --locked python tools/generate_mcp_tools.py
+uv run --locked python tools/generate_mcp_tools.py --check
+```
+
+The generated wrappers delegate to the shared validated dispatcher; the
+signature decorator retains model constraints and default factories in MCP
+discovery. They do not implement a separate query or management layer. Tests
+check source literals, the admin branch, generator drift and actual wire output.
+Do not hand-edit generated declarations independently of the catalog.
+
+The source of truth for a host is the running server's discovery response.
+A GitHub-based directory must separately rescan the committed source; updating a
+local source archive or restarting a daemon does not update that directory.
+These checks do not claim that a third-party directory has approved the server.
+
 Hints never replace authentication, path restrictions or confirmation.
 Retrieved content remains untrusted evidence. See
 [OUTPUT_FORMATS.md](OUTPUT_FORMATS.md) and [SOURCE_GRAPH.md](SOURCE_GRAPH.md).

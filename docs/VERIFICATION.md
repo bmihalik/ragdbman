@@ -6,6 +6,20 @@ quality; reproduction instructions are in [TESTING.md](TESTING.md).
 
 ## Version 0.6.0
 
+### Explicit MCP source declarations
+
+The focused 2 October MCP annotation patch was tested against the GitHub
+baseline with Python 3.12.13: **616 passed, 2 optional tests skipped**.
+It replaces the generic tool factory with generated named declarations.
+Static checks verify 28 tool names, all 112 literal boolean hints, the admin
+branch and generator freshness; existing wire tests verify discovery, scope,
+schemas, defaults and transport behavior. Ruff, formatting, generated reference
+and first-party license-header checks pass.
+
+The earlier local review cleanup is not included in this focused patch. Version
+and public behavior remain unchanged. These checks do not establish a cleared
+m8ven report: the directory must rescan the committed source after publication.
+
 Canonical-interface implementation and release packaging were checked on Linux
 on 1 October 2026:
 
