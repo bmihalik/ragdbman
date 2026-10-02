@@ -8,9 +8,10 @@ import json
 from mcp import types as mcp_types
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, TextContent
 
-from .operations import OPERATIONS, QUERY_OPERATIONS, invoke, signature
+from .mcp_tools import register_tools
+from .operations import OPERATIONS
 
 
 class CorpusMCP(FastMCP):
@@ -62,29 +63,5 @@ def create_mcp(engine, admin=False):
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
 
-    def register(name, spec):
-        async def tool(**kwargs):
-            if name in {"corpus_query", "corpus_graph"}:
-                kwargs.setdefault("format", "llm")
-            return presented(await invoke(engine, name, kwargs, admin=admin))
-
-        tool.__name__ = name
-        tool.__signature__ = signature(name, mcp=True)
-        tool.__annotations__ = {p.name: p.annotation for p in tool.__signature__.parameters.values()}
-        tool.__annotations__["return"] = CallToolResult
-        server.add_tool(
-            tool,
-            name=name,
-            description=spec.description,
-            annotations=ToolAnnotations(
-                readOnlyHint=bool(spec.readonly),
-                destructiveHint=bool(spec.destructive),
-                idempotentHint=bool(spec.idempotent),
-                openWorldHint=False,
-            ),
-        )
-
-    for name, spec in OPERATIONS.items():
-        if admin or name in QUERY_OPERATIONS:
-            register(name, spec)
+    register_tools(server, engine, admin, presented)
     return server

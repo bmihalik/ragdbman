@@ -17,7 +17,9 @@ the SDK transport or silence its error logger.
 
 The MCP boundary is implemented in `mcp_server.py`, with retrieval in
 `corpus.py` and canonical models/dispatch in `operations.py`. CLI, MCP and REST
-registrations are generated from that catalog. Query and
+registrations are generated from that catalog. `mcp_tools.py` contains generated,
+named tool declarations with literal hints for source analyzers; wrappers
+delegate to the same dispatcher, and generated-source drift is tested. Query and
 admin transports use separate tool registries/session managers and share
 server-side authentication in `web.py`; the query registry never contains a
 mutation tool. Credential enforcement covers administrative REST/UI routes as

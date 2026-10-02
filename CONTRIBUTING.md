@@ -18,6 +18,18 @@ Develop against temporary sources and disposable databases. Never use a private
 production corpus as a committed fixture. Add focused unit tests and an engine or
 transport regression for changes that affect the external contract.
 
+`src/ragdbman/operations.py` owns the canonical interfaces. After a catalog
+change, regenerate both source-visible MCP declarations and their reference:
+
+```sh
+uv run --locked python tools/generate_mcp_tools.py
+uv run --locked python tools/generate_interface_reference.py
+```
+
+Commit the generated files with the catalog change. Tests verify their
+content against the generators and check all four literal MCP hints without
+executing registration, as well as checking the running MCP response.
+
 ## Design rules
 
 - Preserve all three collection kinds. Source-code collections must never create

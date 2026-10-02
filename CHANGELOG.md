@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Generate explicit, individually named MCP tool functions with all four
+  literal boolean hints on each decorator, so static source analyzers do not
+  mistake the registration factory for one incomplete tool. Retain canonical
+  model validation/signatures, profile visibility and existing wire behavior.
+- Add source-AST checks and a generator drift check alongside MCP wire tests.
+
 ## 0.6.0
 
 - Adopt canonical corpus, collection, collections and scan operation names across
